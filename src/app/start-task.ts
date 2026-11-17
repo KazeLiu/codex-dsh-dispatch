@@ -23,6 +23,10 @@ import {
   requireNonEmpty,
   type AppDeps,
   type StartRecord,
+  currentViews,
+  forRequest,
+  requestFingerprint,
+  submitSerial,
 } from './deps.js'
 import { readSavedModel, readSavedPermission } from './settings.js'
 
@@ -49,6 +53,10 @@ export interface StartTaskOutput extends StartRecord {
  * 回执必须由桥接自己持有。
  */
 export async function startTask(deps: AppDeps, input: StartTaskInput): Promise<StartTaskOutput> {
+  return submitSerial(deps, () => executeStartTask(deps, input))
+}
+
+async function executeStartTask(deps: AppDeps, input: StartTaskInput): Promise<StartTaskOutput> {
   const cwd = requireNonEmpty(input.cwd, 'cwd')
   const task = requireNonEmpty(input.task, 'task')
   const requestId = requireNonEmpty(input.requestId, 'requestId')
@@ -59,19 +67,20 @@ export async function startTask(deps: AppDeps, input: StartTaskInput): Promise<S
     throw bridgeError('invalid-argument', `cwd 必须是绝对路径：${cwd}`, { cwd })
   }
 
-  // 幂等回执：同一 requestId 已经建过会话，直接复用。
-  const receipt = deps.started.get(requestId)
-  if (receipt !== undefined) {
-    const record = await deps.ports.registry.get(receipt.sessionId)
-    if (record !== null) {
-      const { resolved } = await observeTask(deps, record, null)
-      return { ...receipt, status: resolved.status }
-    }
-    // 登记表丢了这条会话（手工清理过 state.json）：回执失效，按新请求继续。
-    deps.started.delete(requestId)
-  }
-
   const workspace = await deps.ports.workspace.ensureWorkspace({ cwd })
+  const fingerprint = requestFingerprint({ cwd: workspace.canonicalCwd, task, sourcePermission, requestedModel })
+  for (const existing of await deps.ports.registry.list()) {
+    const request = existing.requests?.[requestId]
+    if (request?.kind !== 'start') continue
+    if (request.fingerprint !== fingerprint) throw bridgeError('invalid-argument', '同一 requestId 已用于不同的创建参数', { requestId })
+    await assertNotBusy(deps, existing.canonicalCwd, existing.sessionId)
+    if (request.phase === 'prepared') {
+      await deps.ports.session.prompt({ sessionId: existing.sessionId, requestId, text: task, mode: 'queue' })
+      await deps.ports.registry.upsert({ ...existing, requests: { ...existing.requests, [requestId]: { ...request, phase: 'accepted' } } })
+    }
+    const { resolved } = await observeTask(deps, forRequest(existing, requestId), null)
+    return { workspaceId: existing.workspaceId, sessionId: existing.sessionId, cwd: existing.canonicalCwd, requestId, status: resolved.status, ...await currentViews(deps, existing.sessionId) }
+  }
   await assertNotBusy(deps, workspace.canonicalCwd, null)
 
   // 配置解析：全部在建会话之前完成，失败不留空会话。
@@ -160,10 +169,12 @@ export async function startTask(deps: AppDeps, input: StartTaskInput): Promise<S
     lastSourcePermission: sourcePermission,
     baselineTurn: baseline.lastTurn,
     baselineCursor: baseline.cursor,
+    requests: { [requestId]: { kind: 'start', fingerprint, baselineTurn: baseline.lastTurn, baselineCursor: baseline.cursor, phase: 'prepared' } },
   }
   await deps.ports.registry.upsert(record)
 
   await deps.ports.session.prompt({ sessionId, requestId, text: task, mode: 'queue' })
+  await deps.ports.registry.upsert({ ...record, requests: { [requestId]: { ...record.requests![requestId]!, phase: 'accepted' } } })
 
   const started: StartRecord = {
     workspaceId: workspace.workspaceId,
@@ -173,7 +184,6 @@ export async function startTask(deps: AppDeps, input: StartTaskInput): Promise<S
     permission: permission.view,
     model: model.view,
   }
-  deps.started.set(requestId, started)
   deps.observed.set(observedKey(sessionId, requestId), 'accepted')
 
   return { ...started, status: 'accepted' }

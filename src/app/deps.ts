@@ -7,6 +7,8 @@
  */
 
 import { bridgeError } from '../domain/errors.js'
+import { createHash } from 'node:crypto'
+import { levelOfPreset } from '../domain/permission-map.js'
 import { resolveStatus, type ResolveResult } from '../domain/status-resolver.js'
 import type { ModelView, PermissionView, SessionSnapshot, TaskStatus } from '../domain/types.js'
 import type { Ports, SessionRecord } from '../ports/index.js'
@@ -23,6 +25,7 @@ export interface StartRecord {
 
 /** 用例层依赖。 */
 export interface AppDeps {
+  submissions: Promise<unknown>
   readonly ports: Ports
   /**
    * 同一请求的「上次观察状态」。
@@ -33,20 +36,39 @@ export interface AppDeps {
    * 不会产生错误结论；落盘反而会引入「缓存与真实会话脱节」的新失败模式。
    */
   readonly observed: Map<string, TaskStatus>
-  /**
-   * `dsh_start` 的请求回执：`requestId` → 首次成功时的定位与配置。
-   *
-   * 用于「同一 `requestId` 重试不重复建会话」。宿主的 `prompt` 去重只在**同一
-   * 会话内**按 `rpcId` 生效，而 `dsh_start` 每次都会新建会话，所以原生去重
-   * 覆盖不到这一层——这里补的不是去重表，而是「已经建过哪个会话」的回执。
-   * 只放内存：重载后回执丢失，退化为按登记表的 `lastRequestId` 找回会话
-   * （见 `start-task.ts`），此时配置来源标 `unknown` 而不是猜。
-   */
-  readonly started: Map<string, StartRecord>
 }
 
 export function createAppDeps(ports: Ports): AppDeps {
-  return { ports, observed: new Map<string, TaskStatus>(), started: new Map<string, StartRecord>() }
+  return { ports, observed: new Map<string, TaskStatus>(), submissions: Promise.resolve() }
+}
+
+/** 只串行化本插件的接收与提交，不持有执行期文件锁。 */
+export function submitSerial<T>(deps: AppDeps, action: () => Promise<T>): Promise<T> {
+  const next = deps.submissions.then(action, action)
+  deps.submissions = next.catch(() => undefined)
+  return next
+}
+
+/** 请求内容摘要用于拒绝同一请求 ID 的冲突重试，不存第二份任务正文。 */
+export function requestFingerprint(value: unknown): string {
+  return createHash('sha256').update(JSON.stringify(value)).digest('hex')
+}
+
+export function forRequest(record: SessionRecord, requestId: string): SessionRecord {
+  const request = record.requests?.[requestId]
+  if (request !== undefined) return { ...record, lastRequestId: requestId, baselineTurn: request.baselineTurn, baselineCursor: request.baselineCursor }
+  if (record.lastRequestId === requestId) return record
+  throw bridgeError('invalid-argument', '请求不存在或不属于此会话', { sessionId: record.sessionId, requestId })
+}
+
+export async function currentViews(deps: AppDeps, sessionId: string): Promise<{ permission: PermissionView; model: ModelView }> {
+  const presetId = await deps.ports.permission.currentPreset({ sessionId })
+  const level = presetId === null ? null : levelOfPreset(presetId)
+  const model = await deps.ports.model.currentSelection({ sessionId })
+  return {
+    permission: { level: level ?? 'unknown', presetId, source: presetId === null ? 'unknown' : 'dsh-session' },
+    model: model === null ? { provider: null, model: null, reasoningEffort: null, source: 'unknown' } : { ...model, source: 'dsh-session' },
+  }
 }
 
 /** 观察缓存的键：会话 + 请求。 */
@@ -97,6 +119,8 @@ export async function observeTask(
   const snapshot = await deps.ports.session.readState({ sessionId: record.sessionId })
   const progress = await deps.ports.session.readProgress({
     sessionId: record.sessionId,
+    requestId: record.lastRequestId,
+    ...(record.requests?.[record.lastRequestId]?.callId === undefined ? {} : { callId: record.requests[record.lastRequestId]!.callId! }),
     afterSeq: record.baselineCursor,
     sinceTurn: record.baselineTurn,
   })
@@ -126,7 +150,7 @@ export async function assertNotBusy(
     if (record.canonicalCwd !== canonicalCwd) continue
     if (excludeSessionId !== null && record.sessionId === excludeSessionId) continue
     const snapshot = await deps.ports.session.readState({ sessionId: record.sessionId })
-    if (!snapshot.running) continue
+    if (!snapshot.running && snapshot.pendingInput.length === 0 && snapshot.queued !== true) continue
     throw bridgeError(
       'workspace-busy',
       `工作目录已被本插件的另一个任务占用：${canonicalCwd}`,

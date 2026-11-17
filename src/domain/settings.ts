@@ -287,7 +287,7 @@ function readUpdatePermission(value: unknown): PermissionLevel | null {
 /** 组装快照所需的输入。 */
 export interface SettingsSnapshotInput {
   readonly catalog: readonly ModelCatalogEntry[]
-  readonly dshDefault: { readonly provider: string; readonly model: string } | null
+  readonly dshDefault: { readonly provider: string; readonly model: string; readonly reasoningEffort?: string | undefined } | null
   readonly availablePresetIds: readonly string[]
   readonly saved: SettingsDefaults
   /** 读模型目录失败时的中文原因；成功为 `null`。 */
@@ -337,7 +337,7 @@ export function buildSettingsSnapshot(input: SettingsSnapshotInput): SettingsSna
         : {
             providerId: input.dshDefault.provider,
             modelId: input.dshDefault.model,
-            reasoningEffort: null,
+            reasoningEffort: input.dshDefault.reasoningEffort ?? null,
           },
     permissions: toPermissionOptions(input.availablePresetIds),
     initialPermission: 'ask',

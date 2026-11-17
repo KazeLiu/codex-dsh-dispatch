@@ -18,6 +18,7 @@ import type { TurnEndInfo, TurnEndKind } from './types.js'
 
 /** 归属判定的输入：全部是原生事实，不含桥接状态。 */
 export interface AttributionInput {
+  readonly targetTurn?: number | null
   /** 提交前读到的 `lastTurn`；对应回合号为 `baselineTurn + 1`。 */
   readonly baselineTurn: number
   /** 游标之后观察到的最大已开始回合号；未观察到任何回合时为 `null`。 */
@@ -63,12 +64,12 @@ function findEnd(ends: readonly TurnEndInfo[], turn: number): TurnEndInfo | null
  */
 export function attributeTurn(input: AttributionInput): Attribution {
   const { baselineTurn, startedTurn, ends } = input
-  const turn = expectedTurn(baselineTurn)
-
-  if (startedTurn === null || startedTurn < turn) return { kind: 'pending' }
+  if (input.targetTurn === null) return { kind: 'pending' }
+  const turn = input.targetTurn ?? expectedTurn(baselineTurn)
 
   const end = findEnd(ends, turn)
   if (end !== null) return { kind: 'ended', turn, endKind: end.kind }
+  if (input.targetTurn === undefined && (startedTurn === null || startedTurn < turn)) return { kind: 'pending' }
   return { kind: 'running', turn }
 }
 

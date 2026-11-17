@@ -94,15 +94,18 @@ export function resolveStatus(input: ResolveInput): ResolveResult {
   }
 
   if (attribution.kind === 'running') {
+    if (snapshot.pendingInput.length > 0) {
+      return { status: nextNonTerminal(previous, 'needs_input'), turn: attribution.turn, turnEnd: null }
+    }
     return { status: nextNonTerminal(previous, 'running'), turn: attribution.turn, turnEnd: null }
   }
 
   const hasPendingInput = snapshot.pendingInput.length > 0
-  if (isTurnMissing(attributionInput, snapshot.running, hasPendingInput)) {
+  if (progress.targetTurn === undefined && isTurnMissing(attributionInput, snapshot.running, hasPendingInput)) {
     return { status: nextNonTerminal(previous, 'failed'), turn: null, turnEnd: null }
   }
 
-  if (hasPendingInput) {
+  if (progress.targetTurn === undefined && hasPendingInput) {
     return { status: nextNonTerminal(previous, 'needs_input'), turn: null, turnEnd: null }
   }
 

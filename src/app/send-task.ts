@@ -10,9 +10,9 @@
 
 import { bridgeError } from '../domain/errors.js'
 import { isPermissionLevel, presetOfLevel } from '../domain/permission-map.js'
-import type { PermissionLevel, PermissionView, TaskStatus } from '../domain/types.js'
+import type { ModelView, PermissionLevel, PermissionView, TaskStatus } from '../domain/types.js'
 import type { QuestionAnswer, SessionRecord } from '../ports/index.js'
-import { observedKey, observeTask, requireNonEmpty, type AppDeps } from './deps.js'
+import { assertNotBusy, currentViews, forRequest, observedKey, observeTask, requestFingerprint, requireNonEmpty, submitSerial, type AppDeps } from './deps.js'
 
 /** `dsh_send` 入参。 */
 export interface SendTaskInput {
@@ -36,6 +36,7 @@ export interface SendTaskInput {
  * 自己猜游标会重复拉取已裁剪的记录。
  */
 export interface SendTaskOutput {
+  readonly model: ModelView
   readonly sessionId: string
   readonly requestId: string
   readonly status: TaskStatus
@@ -52,6 +53,10 @@ export interface SendTaskOutput {
  * 会把 T0 推到新回合上，导致该请求永远看不到自己的结束事件。
  */
 export async function sendTask(deps: AppDeps, input: SendTaskInput): Promise<SendTaskOutput> {
+  return submitSerial(deps, () => executeSendTask(deps, input))
+}
+
+async function executeSendTask(deps: AppDeps, input: SendTaskInput): Promise<SendTaskOutput> {
   const sessionId = requireNonEmpty(input.sessionId, 'sessionId')
   const requestId = requireNonEmpty(input.requestId, 'requestId')
   const sourcePermission = readSourcePermission(input.sourcePermission)
@@ -68,29 +73,44 @@ export async function sendTask(deps: AppDeps, input: SendTaskInput): Promise<Sen
   // 请求成功时被写成 `accepted`，若按它回显，一个早已 `completed` 的请求在
   // 客户端重试时会看到「已受理」，然后一直等下去。观测走的是与 `dsh_wait`
   // 完全相同的判定链（终态保持 + 回合归属），结论一致。
-  if (record.lastRequestId === requestId) {
+  const fingerprint = requestFingerprint({ content, sourcePermission })
+  const saved = record.requests?.[requestId]
+  if (saved !== undefined && saved.fingerprint !== fingerprint) {
+    throw bridgeError('invalid-argument', '同一 requestId 已用于不同的消息', { sessionId, requestId })
+  }
+  if (saved?.phase === 'accepted' || (saved === undefined && record.lastRequestId === requestId)) {
     const key = observedKey(sessionId, requestId)
-    const { snapshot, resolved } = await observeTask(deps, record, deps.observed.get(key) ?? null)
+    const { snapshot, resolved } = await observeTask(deps, forRequest(record, requestId), deps.observed.get(key) ?? null)
     deps.observed.set(key, resolved.status)
     return {
       sessionId,
       requestId,
       status: resolved.status,
       cursor: snapshot.cursor,
-      permission: currentPermission(deps, record, sourcePermission),
+      ...await currentViews(deps, sessionId),
     }
   }
 
-  const permission = await applyPermissionIfChanged(deps, record, sourcePermission, sessionId)
+  await assertNotBusy(deps, record.canonicalCwd, sessionId)
+  if (saved === undefined) await applyPermissionIfChanged(deps, record, sourcePermission, sessionId)
 
   // 提交前记录新基线：回合归属判定式是「对应回合 = T0 + 1」。
   const baseline = await deps.ports.session.readState({ sessionId })
+  const request = saved ?? {
+    kind: content.kind,
+    fingerprint,
+    baselineTurn: baseline.lastTurn,
+    baselineCursor: baseline.cursor,
+    phase: 'prepared' as const,
+    ...(content.kind === 'reply' ? { callId: content.callId } : {}),
+  }
   const next: SessionRecord = {
     ...record,
     lastRequestId: requestId,
     lastSourcePermission: sourcePermission ?? record.lastSourcePermission,
-    baselineTurn: content.kind === 'reply' ? replyBaselineTurn(baseline) : baseline.lastTurn,
-    baselineCursor: baseline.cursor,
+    baselineTurn: request.baselineTurn,
+    baselineCursor: request.baselineCursor,
+    requests: { ...record.requests, [requestId]: request },
   }
   await deps.ports.registry.upsert(next)
 
@@ -101,24 +121,23 @@ export async function sendTask(deps: AppDeps, input: SendTaskInput): Promise<Sen
     // 回答提问走原生 `userQuestions.answer`：它把答案作为 steering 消息塞进
     // **当前正在执行的回合**，不会新开回合。所以基线要按「当前开放回合」算
     // （见 replyBaselineTurn），否则 expectedTurn 会永远等不到。
-    await deps.ports.interaction.answer({
-      sessionId,
-      callId: content.callId,
-      answers: content.answers,
-    })
+    const progress = await deps.ports.session.readProgress({ sessionId, requestId, callId: content.callId, afterSeq: request.baselineCursor, sinceTurn: request.baselineTurn })
+    if (!progress.admitted) await deps.ports.interaction.answer({ sessionId, callId: content.callId, answers: content.answers })
+    await deps.ports.registry.upsert({ ...next, requests: { ...next.requests, [requestId]: { ...request, phase: 'accepted' } } })
     deps.observed.set(observedKey(sessionId, requestId), 'accepted')
-    return { sessionId, requestId, status: 'accepted', cursor: baseline.cursor, permission }
+    return { sessionId, requestId, status: 'accepted', cursor: request.baselineCursor, ...await currentViews(deps, sessionId) }
   }
 
   // 提交方式固定 `queue`，不用 `steer`：`steer` 会插进正在执行的回合，可能
   // 打断正在跑的工具调用，让「一条补充说明」变成「一次上下文突变」。`queue`
   // 等当前回合结束再执行，行为可预测，也符合文档第 7 节「补充文字」的定位。
   await deps.ports.session.prompt({ sessionId, requestId, text: content.text, mode: 'queue' })
+  await deps.ports.registry.upsert({ ...next, requests: { ...next.requests, [requestId]: { ...request, phase: 'accepted' } } })
   deps.observed.set(observedKey(sessionId, requestId), 'accepted')
 
   // 返回的是**提交时**的游标（新基线），客户端拿它直接接着 `dsh_wait` 即可
   // 只看到本次提交之后产生的输出。
-  return { sessionId, requestId, status: 'accepted', cursor: baseline.cursor, permission }
+  return { sessionId, requestId, status: 'accepted', cursor: request.baselineCursor, ...await currentViews(deps, sessionId) }
 }
 
 /**
@@ -133,16 +152,6 @@ export async function sendTask(deps: AppDeps, input: SendTaskInput): Promise<Sen
  * 若会话此刻没有开放回合（理论上 `reply` 不该发生，但宿主状态可能已变），
  * 退回 `text` 的算法：把答案当成下一回合的输入，等它开新回合。
  */
-function replyBaselineTurn(snapshot: {
-  readonly openTurnStartSeq: number | null
-  readonly lastTurn: number
-}): number {
-  if (snapshot.openTurnStartSeq !== null && snapshot.lastTurn > 0) {
-    return snapshot.lastTurn - 1
-  }
-  return snapshot.lastTurn
-}
-
 /**
  * 权限同步：仅当源权限值相对上次记录发生变化时才应用。
  *
@@ -155,9 +164,9 @@ async function applyPermissionIfChanged(
   sourcePermission: PermissionLevel | null,
   sessionId: string,
 ): Promise<PermissionView> {
-  if (sourcePermission === null) return currentPermission(deps, record, null)
+  if (sourcePermission === null) return (await currentViews(deps, sessionId)).permission
   if (sourcePermission === record.lastSourcePermission) {
-    return currentPermission(deps, record, sourcePermission)
+    return (await currentViews(deps, sessionId)).permission
   }
 
   const presetId = presetOfLevel(sourcePermission)
@@ -188,24 +197,6 @@ async function applyPermissionIfChanged(
 }
 
 /** 按记录里的上次源值给出权限视图（不再应用，只如实回显）。 */
-function currentPermission(
-  deps: AppDeps,
-  record: SessionRecord,
-  sourcePermission: PermissionLevel | null,
-): PermissionView {
-  const level = sourcePermission ?? record.lastSourcePermission
-  if (level === null) {
-    // 从未取得过源权限：档位未知，不猜。
-    return { level: 'unknown', presetId: null, source: 'unknown' }
-  }
-  const presets = deps.ports.permission.availablePresets()
-  const presetId = presetOfLevel(level)
-  const available = presets.options.some((option) => option.presetId === presetId)
-  // `source` 描述「这个档位是谁定的」：值来自源会话，所以恒为 `source-session`；
-  // 预设读不到时只把 `presetId` 置空，不改 `source`（第 5.6 节）。
-  return { level, presetId: available ? presetId : null, source: 'source-session' }
-}
-
 /** 读源权限：缺省 `null`；非法值必须报错。 */
 function readSourcePermission(value: unknown): PermissionLevel | null {
   if (value === undefined || value === null) return null

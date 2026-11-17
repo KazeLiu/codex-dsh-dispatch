@@ -13,7 +13,7 @@ import type { ModelCatalogEntry } from '../domain/model-choice.js'
 export interface ModelCatalogResult {
   readonly entries: readonly ModelCatalogEntry[]
   /** DSH 全局默认；不可读时为 `null`。 */
-  readonly dshDefault: { readonly provider: string; readonly model: string } | null
+  readonly dshDefault: { readonly provider: string; readonly model: string; readonly reasoningEffort?: string | undefined } | null
 }
 
 export interface ApplySelectionInput {

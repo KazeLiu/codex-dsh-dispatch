@@ -8,9 +8,8 @@
  */
 
 import { bridgeError } from '../domain/errors.js'
-import { resolveStatus } from '../domain/status-resolver.js'
 import type { TaskStatus } from '../domain/types.js'
-import { requireNonEmpty, type AppDeps } from './deps.js'
+import { observeTask, requireNonEmpty, type AppDeps } from './deps.js'
 
 /** `dsh_cancel` 入参。 */
 export interface CancelTaskInput {
@@ -39,20 +38,8 @@ export async function cancelTask(deps: AppDeps, input: CancelTaskInput): Promise
 
   await deps.ports.session.cancel({ sessionId })
 
-  // 受理后立刻观测一次，把「现在是什么状态」如实报出去。
-  // 观测失败不影响取消本身已经受理的事实，退化为 `running`。
-  const snapshot = await deps.ports.session.readState({ sessionId })
-  const progress = await deps.ports.session.readProgress({
-    sessionId,
-    afterSeq: record.baselineCursor,
-    sinceTurn: record.baselineTurn,
-  })
-  const resolved = resolveStatus({
-    previous: null,
-    baselineTurn: record.baselineTurn,
-    progress,
-    snapshot,
-  })
+  // 只有读到原生结束事件才能报告 cancelled，取消受理本身不构成终态。
+  const { resolved } = await observeTask(deps, record, null)
 
   // 该会话所有请求的观察值都要失效：取消会改变后续 wait 的判定基线。
   for (const key of [...deps.observed.keys()]) {

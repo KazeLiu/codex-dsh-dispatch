@@ -10,6 +10,15 @@
 
 import type { PermissionLevel } from '../domain/types.js'
 
+export interface RequestRecord {
+  readonly kind: 'start' | 'text' | 'reply'
+  readonly fingerprint: string
+  readonly baselineTurn: number
+  readonly baselineCursor: number
+  readonly phase: 'prepared' | 'accepted'
+  readonly callId?: string
+}
+
 /** 一条会话归属记录。 */
 export interface SessionRecord {
   readonly sessionId: string
@@ -40,6 +49,7 @@ export interface SessionRecord {
    * 若改用客户端回传的 `cursor`，该回合开始得早于首次 `dsh_wait` 时就会漏掉。
    */
   readonly baselineCursor: number
+  readonly requests?: Readonly<Record<string, RequestRecord>>
 }
 
 /** 登记表读写。 */

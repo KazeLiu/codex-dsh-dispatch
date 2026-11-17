@@ -28,7 +28,7 @@ export type PermissionLevel = 'ask' | 'auto' | 'full'
  * `bridge-default` 自设置持久化接入后**会**产生：`start-task.ts` 把
  * `settings.json` 里保存的默认权限作为第二层传入 `resolvePermissionChoice`。
  */
-export type PermissionSource = 'source-session' | 'bridge-default' | 'initial' | 'unknown'
+export type PermissionSource = 'source-session' | 'bridge-default' | 'initial' | 'dsh-session' | 'unknown'
 
 /**
  * 模型选择来源。`dsh-default` 指 DSH 的全局默认设置（不是会话级默认），
@@ -41,7 +41,7 @@ export type PermissionSource = 'source-session' | 'bridge-default' | 'initial' |
  * `bridge-default` 自设置持久化接入后**会**产生：`start-task.ts` 把
  * `settings.json` 里保存的默认模型作为第二层传入 `resolveModelChoice`。
  */
-export type ModelSource = 'request' | 'bridge-default' | 'dsh-default' | 'unknown'
+export type ModelSource = 'request' | 'bridge-default' | 'dsh-default' | 'dsh-session' | 'unknown'
 
 export interface ModelView {
   readonly provider: string | null
@@ -97,6 +97,7 @@ export type PendingInputKind = 'approval' | 'question' | 'other'
 
 /** 一次会话状态快照，已抹平宿主细节。 */
 export interface SessionSnapshot {
+  readonly queued?: boolean
   /** 会话事件游标；桥接只做透传，不解释其内部含义。 */
   readonly cursor: number
   /** 会话是否仍处于可交互状态（未归档、未卸载）。 */
@@ -150,6 +151,9 @@ export interface TurnEndInfo {
 
 /** 游标之后的回合进展：已开始的最大回合号与全部回合结束事件。 */
 export interface TurnProgress {
+  /** null 表示该输入尚未进入回合；省略仅供旧调用按基线判断。 */
+  readonly targetTurn?: number | null
+  readonly admitted?: boolean
   readonly startedTurn: number | null
   /**
    * 游标之后观察到的全部 `turn/end`。

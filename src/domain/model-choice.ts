@@ -3,7 +3,7 @@
  *
  * 三层顺序（见 docs/DEVELOPMENT.md 第 4 节）：
  * 1. 请求显式指定（`model` 参数）
- * 2. 桥接保存的默认值（第 1 阶段尚未实现设置持久化，恒为缺失）
+ * 2. 桥接保存的默认值（由 `SettingsPort` 持久化，读不到时降级为缺失）
  * 3. DSH 全局默认（由宿主 `modelCatalog().default` 提供）
  *
  * 关键约束：**不猜**。请求里 provider 与 model 必须成对出现；保存的默认值
@@ -27,7 +27,7 @@ export interface ModelChoiceInput {
   readonly saved: SavedModel | null
   readonly catalog: readonly ModelCatalogEntry[]
   /** 宿主报告的全局默认；不可读时为 `null`。 */
-  readonly dshDefault: { readonly provider: string; readonly model: string } | null
+  readonly dshDefault: { readonly provider: string; readonly model: string; readonly reasoningEffort?: string | undefined } | null
 }
 
 /** 解析失败原因。 */
@@ -158,7 +158,7 @@ export function resolveModelChoice(input: ModelChoiceInput): ModelChoiceResult {
   if (dshDefault !== null) {
     const entry = findEntry(catalog, dshDefault.provider, dshDefault.model)
     if (entry !== null) {
-      const effort = resolveEffort(entry, requestedEffort)
+      const effort = resolveEffort(entry, requestedEffort ?? dshDefault.reasoningEffort)
       if (!effort.ok) {
         return { ok: false, failure: 'requested-effort-unavailable', detail: effort.detail }
       }

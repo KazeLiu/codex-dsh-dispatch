@@ -64,7 +64,7 @@ export function createSessionAdapter(ctx: HostContext): SessionPort {
           sessionId: input.sessionId,
           mode: input.mode,
           content: [{ type: 'text', text: input.text }],
-        })
+        }, new AbortController().signal)
         return { accepted: result.accepted }
       } catch (cause) {
         throw bridgeError(
@@ -87,7 +87,7 @@ export function createSessionAdapter(ctx: HostContext): SessionPort {
             timeoutMs: input.timeoutMs,
             maxMessages: input.maxMessages,
           },
-          input.signal,
+          input.signal ?? new AbortController().signal,
         )
       } catch (cause) {
         // 等待被中断（客户端断开）不是失败：让上层按「超时」处理，
@@ -138,7 +138,7 @@ export function createSessionAdapter(ctx: HostContext): SessionPort {
       const controller = requireService(ctx, 'sessionController')
       let state: HostSessionState
       try {
-        state = await controller.state({ sessionId: input.sessionId })
+        state = await controller.state({ sessionId: input.sessionId }, new AbortController().signal)
       } catch (cause) {
         if (isSessionNotFound(cause)) {
           throw bridgeError('session-not-found', `会话不存在：${input.sessionId}`, {
@@ -154,7 +154,7 @@ export function createSessionAdapter(ctx: HostContext): SessionPort {
       const controller = requireService(ctx, 'sessionController')
       let state: HostSessionState
       try {
-        state = await controller.state({ sessionId: input.sessionId })
+        state = await controller.state({ sessionId: input.sessionId }, new AbortController().signal)
       } catch (cause) {
         if (isSessionNotFound(cause)) {
           throw bridgeError('session-not-found', `会话不存在：${input.sessionId}`, {
@@ -165,16 +165,13 @@ export function createSessionAdapter(ctx: HostContext): SessionPort {
       }
 
       const window = await readEventsSince(ctx, input.sessionId, state.cursor, input.afterSeq)
-      return toProgress(window.events, input.sinceTurn, window.truncated)
+      return toProgress(window.events, input.sinceTurn, window.truncated, input.requestId, input.callId)
     },
   }
 }
 
 /** 历史分页单页条数：只数消息，但返回切片里的全部事件。 */
 const PROGRESS_PAGE_SIZE = 200
-
-/** 历史分页最多回溯页数，防止异常会话把内存拖爆。 */
-const PROGRESS_MAX_PAGES = 5
 
 /**
  * 读 `afterSeq` 之后的事件。
@@ -198,9 +195,9 @@ async function readEventsSince(
   const controller = requireService(ctx, 'sessionController')
   const collected: HostSessionEventEntry[] = []
   let beforeSeq: number | undefined
-  let truncated = false
+  const truncated = false
 
-  for (let page = 0; page < PROGRESS_MAX_PAGES; page++) {
+  for (;;) {
     let result
     try {
       result = await controller.events({
@@ -208,7 +205,7 @@ async function readEventsSince(
         throughSeq: cursor,
         ...(beforeSeq === undefined ? {} : { beforeSeq }),
         maxMessages: PROGRESS_PAGE_SIZE,
-      })
+      }, new AbortController().signal)
     } catch (cause) {
       if (isSessionNotFound(cause)) {
         throw bridgeError('session-not-found', `会话不存在：${sessionId}`, { sessionId })
@@ -216,14 +213,12 @@ async function readEventsSince(
       throw bridgeError('internal', '读取会话历史失败', { sessionId }, cause)
     }
 
-    collected.unshift(...result.records)
+    collected.unshift(...result.records.filter(entry => ['turn/start', 'turn/end', 'user/message', 'agent/inbox/spliced'].includes(entry.event.type)))
     const first = result.records[0]
     if (!result.hasMore || first === undefined) break
     // 已经覆盖到提交点，再往前翻与本请求无关。
     if (first.event.seq <= afterSeq) break
     beforeSeq = first.event.seq
-    // 最后一页仍要往前翻：说明窗口没覆盖到提交点。
-    if (page === PROGRESS_MAX_PAGES - 1) truncated = true
   }
 
   return { events: collected.filter((entry) => entry.event.seq > afterSeq), truncated }
@@ -234,15 +229,35 @@ function toProgress(
   events: readonly HostSessionEventEntry[],
   sinceTurn: number,
   truncated: boolean,
+  requestId?: string,
+  callId?: string,
 ): TurnProgress {
   let startedTurn: number | null = null
   const ends: TurnEndInfo[] = []
+  let currentTurn = sinceTurn
+  let targetTurn: number | null = null
+  let admitted = false
+
+  const matches = (data: unknown): boolean => {
+    if (data === null || typeof data !== 'object') return false
+    const source = (data as { source?: { rpcId?: string; callId?: string } }).source
+    return callId === undefined ? source?.rpcId === requestId : source?.callId === callId
+  }
 
   for (const entry of events) {
+    if (entry.event.type === 'user/message' && matches(entry.event.data)) {
+      targetTurn = currentTurn
+      admitted = true
+    }
+    if (entry.event.type === 'agent/inbox/spliced') {
+      const inserted = (entry.event.data as { inserted?: unknown[] }).inserted
+      if (inserted?.some(matches)) admitted = true
+    }
     const turn = readTurnNumber(entry.event.data)
     if (turn === null) continue
 
     if (entry.event.type === 'turn/start') {
+      currentTurn = turn
       if (startedTurn === null || turn > startedTurn) startedTurn = turn
       continue
     }
@@ -253,7 +268,7 @@ function toProgress(
     }
   }
 
-  return { startedTurn, ends, truncated }
+  return { startedTurn, ends, truncated, ...(requestId === undefined ? {} : { targetTurn, admitted }) }
 }
 
 /** 读事件 data 里的 `turn` 字段。 */
@@ -293,6 +308,7 @@ function toSnapshot(
     cursor: state.cursor,
     active: state.active,
     running: state.running,
+    queued: (state.queue?.length ?? 0) > 0,
     pendingInput: state.pendingInput.map(toPendingInputKind),
     openTurnStartSeq: boundary.openTurnStartSeq,
     lastTurn: boundary.lastTurn,

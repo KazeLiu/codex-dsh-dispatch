@@ -229,7 +229,7 @@ async function readHasApproval(ctx: HostContext, sessionId: string): Promise<boo
   const controller = readService(ctx, 'sessionController')
   if (controller === undefined) return false
   try {
-    const state = await controller.state({ sessionId })
+    const state = await controller.state({ sessionId }, new AbortController().signal)
     return state.pendingInput.includes('approval')
   } catch {
     return false

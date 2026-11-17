@@ -120,6 +120,7 @@ export interface HostSessionController {
     reasoningEffort?: string
   }): Promise<{ selected: HostModelSelection }>
   modelCatalog(): Promise<HostModelCatalog>
+  resolveAgent(sessionId: string): Promise<{ agent: HostAgent } | { error: unknown }>
   prompt(
     request: {
       requestId: string
@@ -127,10 +128,10 @@ export interface HostSessionController {
       mode: 'queue' | 'steer'
       content: readonly { readonly type: 'text'; readonly text: string }[]
     },
-    signal?: AbortSignal,
+    signal: AbortSignal,
   ): Promise<{ accepted: true }>
   cancel(request: { sessionId: string }): { accepted: true }
-  state(request: { sessionId: string }, signal?: AbortSignal): Promise<HostSessionState>
+  state(request: { sessionId: string }, signal: AbortSignal): Promise<HostSessionState>
   /**
    * 历史分页。
    * 来源：dsh-api-session-controller/src/index.ts:544
@@ -144,7 +145,7 @@ export interface HostSessionController {
       beforeSeq?: number
       maxMessages?: number
     },
-    signal?: AbortSignal,
+    signal: AbortSignal,
   ): Promise<{
     cursor: number
     records: readonly HostSessionEventEntry[]
@@ -157,7 +158,7 @@ export interface HostSessionController {
       afterSeq?: number
       maxMessages?: number
     },
-    signal?: AbortSignal,
+    signal: AbortSignal,
   ): Promise<HostSessionWaitValue>
 }
 
@@ -188,6 +189,7 @@ export interface HostPermissionPresets {
 export interface HostSession {
   readonly id: string
   readonly seq: number
+  snapshotEvents(offset?: number): readonly HostSessionEventEntry['event'][]
 }
 
 /** 会话存储。来源：dsh-session/src/index.ts:1456/1464。 */
@@ -221,6 +223,10 @@ export interface HostSessionProjections {
 export interface HostAgent {
   readonly id: string
   readonly session: HostSession
+  readonly model: {
+    select(selection: HostModelSelection): void
+    current(): HostModelSelection | undefined
+  }
 }
 
 /** agent 服务。来源：dsh-agent/src/index.ts:301 `turnBoundaryOf`、:581 `get`。 */

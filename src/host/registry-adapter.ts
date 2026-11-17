@@ -18,7 +18,7 @@ import { dirname, join } from 'node:path'
 
 import { bridgeError } from '../domain/errors.js'
 import type { PermissionLevel } from '../domain/types.js'
-import type { SessionRecord, SessionRegistryPort } from '../ports/registry-port.js'
+import type { RequestRecord, SessionRecord, SessionRegistryPort } from '../ports/registry-port.js'
 import type { HostContext } from './host-types.js'
 
 /** 登记表文件格式版本；结构变化时递增，读取时按版本迁移。 */
@@ -37,6 +37,7 @@ interface PersistedState {
 }
 
 interface PersistedSession {
+  readonly requests?: Readonly<Record<string, RequestRecord>>
   readonly workspaceId: string
   readonly canonicalCwd: string
   readonly lastRequestId: string
@@ -176,6 +177,7 @@ function toRecord(sessionId: string, session: PersistedSession): SessionRecord {
     lastSourcePermission: session.lastSourcePermission,
     baselineTurn: session.baselineTurn,
     baselineCursor: session.baselineCursor,
+    ...(session.requests === undefined ? {} : { requests: session.requests }),
   }
 }
 
@@ -187,6 +189,7 @@ function toPersisted(record: SessionRecord): PersistedSession {
     lastSourcePermission: record.lastSourcePermission,
     baselineTurn: record.baselineTurn,
     baselineCursor: record.baselineCursor,
+    ...(record.requests === undefined ? {} : { requests: record.requests }),
   }
 }
 
@@ -218,13 +221,32 @@ function parseState(value: unknown): PersistedState {
       lastRequestId: readString(entry['lastRequestId']),
       lastSourcePermission: readPermissionLevel(entry['lastSourcePermission']),
       baselineTurn: readCount(entry['baselineTurn'], 0),
-      baselineCursor: readCount(entry['baselineCursor'], 0),
+      baselineCursor: typeof entry['baselineCursor'] === 'number' && entry['baselineCursor'] === -1 ? -1 : readCount(entry['baselineCursor'], 0),
+      requests: parseRequests(entry['requests']),
     }
   }
   return { version: STATE_VERSION, sessions: parsed }
 }
 
-/** 判断 `ENOENT`。 */
+function parseRequests(value: unknown): Record<string, RequestRecord> {
+  if (value === null || typeof value !== 'object') return {}
+  const result: Record<string, RequestRecord> = {}
+  for (const [id, item] of Object.entries(value)) {
+    if (item === null || typeof item !== 'object') continue
+    const raw = item as Record<string, unknown>
+    if (raw.kind !== 'start' && raw.kind !== 'text' && raw.kind !== 'reply') continue
+    if (raw.phase !== 'prepared' && raw.phase !== 'accepted') continue
+    if (typeof raw.fingerprint !== 'string') continue
+    result[id] = {
+      kind: raw.kind, phase: raw.phase, fingerprint: raw.fingerprint,
+      baselineTurn: readCount(raw.baselineTurn, 0),
+      baselineCursor: typeof raw.baselineCursor === 'number' && Number.isSafeInteger(raw.baselineCursor) && raw.baselineCursor >= -1 ? raw.baselineCursor : -1,
+      ...(typeof raw.callId === 'string' ? { callId: raw.callId } : {}),
+    }
+  }
+  return result
+}
+
 function isNotFound(cause: unknown): boolean {
   return (
     typeof cause === 'object' &&

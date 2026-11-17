@@ -77,6 +77,8 @@ export interface ReadStateInput {
  */
 export interface ReadProgressInput {
   readonly sessionId: string
+  readonly requestId?: string
+  readonly callId?: string
   /** 只读 `seq > afterSeq` 的事件；首次传 `-1`。 */
   readonly afterSeq: number
   /**

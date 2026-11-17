@@ -11,7 +11,7 @@ import { BridgeError, bridgeError } from '../domain/errors.js'
 import { resolveStatus } from '../domain/status-resolver.js'
 import type { OutputRecord, PendingInputKind, TaskStatus, TurnEndInfo } from '../domain/types.js'
 import type { PendingQuestion } from '../ports/index.js'
-import { observedKey, requireNonEmpty, type AppDeps } from './deps.js'
+import { currentViews, forRequest, observedKey, requireNonEmpty, type AppDeps } from './deps.js'
 
 /** 默认等待时长：与宿主原生缺省一致（30 秒）。 */
 const DEFAULT_TIMEOUT_MS = 30_000
@@ -64,10 +64,12 @@ export async function waitTask(deps: AppDeps, input: WaitTaskInput): Promise<Wai
   const cursor = readCursor(input.cursor)
   const timeoutMs = readTimeout(input.timeoutMs)
 
-  const record = await deps.ports.registry.get(sessionId)
-  if (record === null) {
+  const session = await deps.ports.registry.get(sessionId)
+  if (session === null) {
     throw bridgeError('session-not-found', `会话不存在或不属于本插件：${sessionId}`, { sessionId })
   }
+  const record = forRequest(session, requestId)
+  const callId = record.requests?.[requestId]?.callId
 
   const key = observedKey(sessionId, requestId)
   const previous = deps.observed.get(key) ?? null
@@ -88,6 +90,8 @@ export async function waitTask(deps: AppDeps, input: WaitTaskInput): Promise<Wai
       const snapshot = await deps.ports.session.readState({ sessionId })
       const progress = await deps.ports.session.readProgress({
         sessionId,
+        requestId,
+        ...(callId === undefined ? {} : { callId }),
         afterSeq: record.baselineCursor,
         sinceTurn: record.baselineTurn,
       })
@@ -105,6 +109,8 @@ export async function waitTask(deps: AppDeps, input: WaitTaskInput): Promise<Wai
 
   const progress = await deps.ports.session.readProgress({
     sessionId,
+    requestId,
+    ...(callId === undefined ? {} : { callId }),
     afterSeq: record.baselineCursor,
     sinceTurn: record.baselineTurn,
   })
@@ -138,6 +144,7 @@ async function buildOutput(
   turnEnd: TurnEndInfo | null,
 ): Promise<WaitTaskOutput> {
   const base = {
+    ...await currentViews(deps, sessionId),
     status,
     cursor,
     output,
