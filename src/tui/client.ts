@@ -5,9 +5,9 @@ export interface ClientConfig { readonly baseUrl: string; readonly token: string
 
 /** 空值表示自动发现；显式环境覆盖继续保留。 */
 export function readClientConfig(env: NodeJS.ProcessEnv = process.env): ClientConfig {
-  const token = env['DSH_MCP_BRIDGE_TOKEN']
+  const token = env['CODEX_DSH_DISPATCH_TOKEN']
   return {
-    baseUrl: env['DSH_MCP_BRIDGE_URL']?.trim().replace(/\/+$/, '') ?? '',
+    baseUrl: env['CODEX_DSH_DISPATCH_URL']?.trim().replace(/\/+$/, '') ?? '',
     token: token === undefined || token.trim() === '' ? null : token,
   }
 }
@@ -29,7 +29,7 @@ async function request(config: ClientConfig, method: 'GET' | 'PUT', body?: Setti
     try {
       const connection = await readConnection()
       config = { baseUrl: config.baseUrl || connection.url, token: config.token ?? connection.token }
-    } catch { throw new SettingsClientError('找不到桥接连接信息。请先在 DSH 中加载 dsh-mcp-bridge 插件。') }
+    } catch { throw new SettingsClientError('找不到桥接连接信息。请先在 DSH 中加载 codex-dsh-dispatch 插件。') }
   }
   let response: Response
   let text: string
@@ -58,7 +58,7 @@ async function request(config: ClientConfig, method: 'GET' | 'PUT', body?: Setti
 
 function describeFailure(status: number, parsed: unknown, text: string): string {
   if (status === 403 && text.includes('Browser access is disabled')) {
-    return '连接到了旧的 DSH 网页端口，请清除 DSH_MCP_BRIDGE_URL/TOKEN 环境覆盖后重试，无需打开浏览器访问。'
+    return '连接到了旧的 DSH 网页端口，请清除 CODEX_DSH_DISPATCH_URL/TOKEN 环境覆盖后重试，无需打开浏览器访问。'
   }
   if (typeof parsed === 'object' && parsed !== null) {
     const error = (parsed as { error?: unknown }).error

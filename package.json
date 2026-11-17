@@ -1,8 +1,23 @@
 {
-  "name": "dsh-mcp-bridge",
+  "name": "codex-dsh-dispatch",
   "version": "0.1.0",
-  "private": true,
   "description": "把 DSH 会话能力以 Streamable HTTP MCP 服务暴露给 Codex 等 MCP 客户端的 DSH 插件",
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "codex",
+    "mcp",
+    "dispatch",
+    "plugin"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/KazeLiu/codex-dsh-dispatch.git"
+  },
+  "homepage": "https://github.com/KazeLiu/codex-dsh-dispatch#readme",
+  "bugs": {
+    "url": "https://github.com/KazeLiu/codex-dsh-dispatch/issues"
+  },
   "type": "module",
   "main": "./lib/index.js",
   "types": "./lib/index.d.ts",
@@ -14,7 +29,7 @@
     "./package.json": "./package.json"
   },
   "bin": {
-    "dsh-mcp-bridge": "./bin/dsh-mcp-bridge.mjs"
+    "codex-dsh-dispatch": "./bin/codex-dsh-dispatch.mjs"
   },
   "icon": "./icon.svg",
   "files": [
@@ -24,14 +39,18 @@
     "locale",
     "icon.svg",
     "cordis.patch.yml",
-    "README.md"
+    "README.md",
+    "docs/INSTALL.md",
+    "docs/WORKFLOW.md",
+    "docs/PUBLISHING.md"
   ],
   "engines": {
     "node": "^22.19.0 || >=24.9.0",
-    "dsh": ">=0.2.0-rc.1 <0.3.0-0"
+    "dsh": ">=0.2.0-rc.1 <0.3.0-0 || >=0.2.2-rc.3 <0.2.3-0"
   },
   "scripts": {
     "build": "tsc",
+    "prepare": "npm run build",
     "check:boundaries": "node scripts/check-boundaries.mjs",
     "typecheck": "npm run check:boundaries && tsc --noEmit",
     "syntax": "node --experimental-strip-types --check src/index.ts"
@@ -42,16 +61,12 @@
     }
   },
   "peerDependencies": {
-    "@deepseek-ai/dsh-api-session-controller": ">=0.2.0-rc.1 <0.3.0-0",
-    "@deepseek-ai/dsh-host-webserver": ">=0.2.0-rc.1 <0.3.0-0",
-    "@deepseek-ai/dsh-permission-presets": ">=0.2.0-rc.1 <0.3.0-0",
-    "@deepseek-ai/dsh-session": ">=0.2.0-rc.1 <0.3.0-0",
-    "@deepseek-ai/dsh-workspace": ">=0.2.0-rc.1 <0.3.0-0"
+    "@deepseek-ai/dsh-api-session-controller": ">=0.2.0-rc.1 <0.3.0-0 || >=0.2.2-rc.3 <0.2.3-0",
+    "@deepseek-ai/dsh-permission-presets": ">=0.2.0-rc.1 <0.3.0-0 || >=0.2.2-rc.3 <0.2.3-0",
+    "@deepseek-ai/dsh-session": ">=0.2.0-rc.1 <0.3.0-0 || >=0.2.2-rc.3 <0.2.3-0",
+    "@deepseek-ai/dsh-workspace": ">=0.2.0-rc.1 <0.3.0-0 || >=0.2.2-rc.3 <0.2.3-0"
   },
   "peerDependenciesMeta": {
-    "@deepseek-ai/dsh-host-webserver": {
-      "optional": true
-    },
     "@deepseek-ai/dsh-api-session-controller": {
       "optional": true
     },

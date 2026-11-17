@@ -13,7 +13,7 @@
 import type { IncomingMessage } from 'node:http'
 
 /** 凭据环境变量名。 */
-export const TOKEN_ENV = 'DSH_MCP_BRIDGE_TOKEN'
+export const TOKEN_ENV = 'CODEX_DSH_DISPATCH_TOKEN'
 
 /** 认证结果：`null` 表示放行。 */
 export interface AuthRejection {

@@ -1,5 +1,5 @@
 /**
- * 设置端口的宿主实现：读写 `$DSH_HOME/dsh-mcp-bridge/settings.json`。
+ * 设置端口的宿主实现：读写 `$DSH_HOME/codex-dsh-dispatch/settings.json`。
  *
  * 为什么不用宿主的 `ctx.settings`：那是「编辑 profile 里各插件 Config」的表单
  * 服务（`dsh-settings/src/index.ts` 的 `SettingsForms.describe()` 返回全部已激活
@@ -29,7 +29,7 @@ import type { SettingsPort } from '../ports/settings-port.js'
 import type { HostContext } from './host-types.js'
 
 /** 本插件在 DSH 主目录下的数据子目录名（与登记表一致）。 */
-const DATA_DIR_NAME = 'dsh-mcp-bridge'
+const DATA_DIR_NAME = 'codex-dsh-dispatch'
 
 /** 设置文件名。 */
 const SETTINGS_FILE_NAME = 'settings.json'

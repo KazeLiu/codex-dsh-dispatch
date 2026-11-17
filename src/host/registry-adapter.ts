@@ -1,5 +1,5 @@
 /**
- * 会话归属登记表的宿主实现：读写 `$DSH_HOME/dsh-mcp-bridge/state.json`。
+ * 会话归属登记表的宿主实现：读写 `$DSH_HOME/codex-dsh-dispatch/state.json`。
  *
  * 为什么直接用 `node:fs` 而不是宿主的 `storageDomain`：`storageDomain` 需要
  * 额外配置 backend 与域声明（`defineDomain` + zod schema + version），而本插件
@@ -25,7 +25,7 @@ import type { HostContext } from './host-types.js'
 const STATE_VERSION = 1
 
 /** 本插件在 DSH 主目录下的数据子目录名。 */
-const DATA_DIR_NAME = 'dsh-mcp-bridge'
+const DATA_DIR_NAME = 'codex-dsh-dispatch'
 
 /** 登记表文件名。 */
 const STATE_FILE_NAME = 'state.json'
@@ -241,6 +241,8 @@ function parseRequests(value: unknown): Record<string, RequestRecord> {
       kind: raw.kind, phase: raw.phase, fingerprint: raw.fingerprint,
       baselineTurn: readCount(raw.baselineTurn, 0),
       baselineCursor: typeof raw.baselineCursor === 'number' && Number.isSafeInteger(raw.baselineCursor) && raw.baselineCursor >= -1 ? raw.baselineCursor : -1,
+      // 早期记录没有 `mode`（当时固定 queue），缺省按 `queue` 兜底而不是丢弃整条。
+      ...(raw.kind === 'text' ? { mode: raw.mode === 'steer' ? 'steer' as const : 'queue' as const } : {}),
       ...(typeof raw.callId === 'string' ? { callId: raw.callId } : {}),
     }
   }

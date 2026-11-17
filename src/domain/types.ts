@@ -15,6 +15,15 @@ export type TaskStatus =
 export type PermissionLevel = 'ask' | 'auto' | 'full'
 
 /**
+ * 文字提交的投递方式，直接透传宿主 `prompt` 的原生 `mode`。
+ *
+ * - `queue`：排队，等当前回合结束后再执行（缺省，与加入该字段前的语义一致）。
+ * - `steer`：插进当前回合，由宿主在可接受的边界注入。宿主不保证立刻打断
+ *   正在执行的工具调用，`accepted` 也不代表已生效。
+ */
+export type PromptMode = 'queue' | 'steer'
+
+/**
  * 权限值来源，用于回显「实际生效配置与来源」。
  * `source-session` 指源会话带来的值，`bridge-default` 指桥接保存的默认值，
  * `initial` 指初始值（`ask`），`unknown` 指当前无法读到实际生效值。

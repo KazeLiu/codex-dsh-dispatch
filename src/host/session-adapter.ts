@@ -224,7 +224,20 @@ async function readEventsSince(
   return { events: collected.filter((entry) => entry.event.seq > afterSeq), truncated }
 }
 
-/** 从事件里提取回合进展。 */
+/**
+ * 从事件里提取回合进展。
+ *
+ * 落点回合一律由**原生事件**给出，不用 `T0 + 1` 推算：
+ * - `user/message` 的 `source.rpcId` 命中本请求 → 该消息所在的回合就是落点；
+ * - `agent/inbox/spliced` 只证明已进入收件箱，不证明已被当前回合消费。
+ *   排队消息也会在前一回合执行期间出现该事件，不能据此认定落点。
+ *
+ * 因此 `turn/end` 的下界必须是 `>= sinceTurn` 而不是 `> sinceTurn`：`steer` /
+ * `reply` 落在提交时那个开放回合上，它的结束事件回合号就等于 `sinceTurn`，
+ * 用严格大于会永远看不到这条结束事件，任务会一直停在 `running`。
+ * `queue` 不受影响——它的落点是新开的回合（`turn/start` 必然出现在观察窗口
+ * 内并更新 `currentTurn`），旧回合的结束事件因回合号不匹配而被忽略。
+ */
 function toProgress(
   events: readonly HostSessionEventEntry[],
   sinceTurn: number,
@@ -234,6 +247,8 @@ function toProgress(
 ): TurnProgress {
   let startedTurn: number | null = null
   const ends: TurnEndInfo[] = []
+  // 窗口从 `afterSeq` 之后开始，开放回合的 `turn/start` 可能早于窗口，
+  // 因此把「提交时那个开放回合」当作初始当前回合。
   let currentTurn = sinceTurn
   let targetTurn: number | null = null
   let admitted = false
@@ -251,7 +266,9 @@ function toProgress(
     }
     if (entry.event.type === 'agent/inbox/spliced') {
       const inserted = (entry.event.data as { inserted?: unknown[] }).inserted
-      if (inserted?.some(matches)) admitted = true
+      if (inserted?.some(matches)) {
+        admitted = true
+      }
     }
     const turn = readTurnNumber(entry.event.data)
     if (turn === null) continue
@@ -262,7 +279,7 @@ function toProgress(
       continue
     }
 
-    if (entry.event.type === 'turn/end' && turn > sinceTurn) {
+    if (entry.event.type === 'turn/end' && turn >= sinceTurn) {
       const kind = readTurnEndKind(entry.event.data)
       if (kind !== null) ends.push({ turn, kind })
     }

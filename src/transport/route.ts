@@ -24,12 +24,12 @@ export interface RouteRegistry {
 }
 
 /** 本插件占用的 MCP 路由前缀。 */
-export const ROUTE_PATH = '/mcp/dsh-mcp-bridge'
+export const ROUTE_PATH = '/mcp/codex-dsh-dispatch'
 
 /**
  * 设置读写路由（TUI 与其它本机配置客户端用）。
  *
- * 刻意与 MCP 路由分开：`/mcp/dsh-mcp-bridge` 说的是 MCP 协议，而设置是普通
+ * 刻意与 MCP 路由分开：`/mcp/codex-dsh-dispatch` 说的是 MCP 协议，而设置是普通
  * REST 语义（`GET` 读快照、`PUT` 写默认值），混进 MCP 端点会让一个只认
  * JSON-RPC 的客户端把设置请求当成非法帧。
  */

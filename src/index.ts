@@ -15,7 +15,7 @@ import { createMcpHandler, sendJson } from './transport/http.js'
 import { ROUTE_PATH, SETTINGS_ROUTE_PATH } from './transport/route.js'
 import { createSettingsHandler } from './transport/settings-route.js'
 
-export const name = 'dsh-mcp-bridge'
+export const name = 'codex-dsh-dispatch'
 export interface Config { readonly enabled?: boolean; readonly stateHome?: string }
 
 /** 插件拥有自己的回环端口，不挂载 DSH 浏览器路由，也不改变其访问策略。 */
@@ -40,7 +40,7 @@ export async function apply(ctx: HostContext, config?: Config): Promise<void> {
       else res.end()
     })
   })
-  ctx.effect(() => () => { server.close() }, 'dsh-mcp-bridge: listener')
+  ctx.effect(() => () => { server.close() }, 'codex-dsh-dispatch: listener')
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject)
     server.listen(0, '127.0.0.1', () => { server.off('error', reject); resolve() })
@@ -50,5 +50,5 @@ export async function apply(ctx: HostContext, config?: Config): Promise<void> {
   try {
     await publishConnection({ url: `http://127.0.0.1:${address.port}`, token }, config?.stateHome)
   } catch (cause) { server.close(); throw cause }
-  ctx.logger.info('dsh-mcp-bridge 已就绪（仅本机回环端口 %d）', address.port)
+  ctx.logger.info('codex-dsh-dispatch 已就绪（仅本机回环端口 %d）', address.port)
 }

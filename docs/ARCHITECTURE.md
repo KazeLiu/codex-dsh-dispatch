@@ -61,15 +61,15 @@ src/
     permission-adapter.ts     # PermissionPort 实现（第 1 阶段即需：提交首条任务前要应用权限）
     model-adapter.ts          # ModelPort 实现（第 1 阶段即需：提交首条任务前要应用模型）
     registry-adapter.ts       # SessionRegistryPort 实现（$DSH_HOME 下的最小归属表）
-    settings-adapter.ts       # SettingsPort 实现（$DSH_HOME/dsh-mcp-bridge/settings.json）
+    settings-adapter.ts       # SettingsPort 实现（$DSH_HOME/codex-dsh-dispatch/settings.json）
   ports/
     workspace-port.ts
     session-port.ts
     interaction-port.ts
     permission-port.ts
     model-port.ts
-    registry-port.ts          # 会话归属登记（$DSH_HOME/dsh-mcp-bridge/state.json）
-    settings-port.ts          # 桥接默认值持久化（$DSH_HOME/dsh-mcp-bridge/settings.json）
+    registry-port.ts          # 会话归属登记（$DSH_HOME/codex-dsh-dispatch/state.json）
+    settings-port.ts          # 桥接默认值持久化（$DSH_HOME/codex-dsh-dispatch/settings.json）
     index.ts                  # 端口聚合类型，供装配根引用
   domain/
     types.ts                  # 六态、视图、快照、输出记录等纯类型
@@ -110,8 +110,13 @@ src/
     render.ts                 # 纯字符串渲染（CJK 双宽对齐，无第三方依赖）
     client.ts                 # 本机认证通道的 HTTP 客户端（凭据只从环境读）
     main.ts                   # 行命令主循环（跨 Windows shell 一致）
+    setup.ts                  # 接入向导主菜单（DSH 不在线也能用）
+    codex-cli.ts              # 定位并调用官方 codex CLI（execFile，不经 shell）
+    mcp-registration.ts       # 登记/移除本插件的 Codex MCP 条目
+    agents-file.ts            # AGENTS.md 托管区块的幂等读写
+    collaboration-prompt.ts   # 协作提示词正文（托管区块内容）
 bin/
-  dsh-mcp-bridge.mjs          # CLI 入口（零依赖、零构建，动态 import lib/tui/main.js）
+  codex-dsh-dispatch.mjs        # CLI 入口（零依赖、零构建，动态 import lib/tui/main.js）
 locale/
   en.json                     # 插件元数据（meta.title / meta.description），宿主插件列表显示用
   zh.json                     # 同上，简体中文
@@ -120,9 +125,11 @@ cordis.patch.yml              # 把插件挂进 cordis 树；id 必须等于 src
 package.json
 ```
 
-第 1 阶段**不建**：`src/config/`、`src/cli/`。第 ④ 步的落地形态与原计划不同：设置持久化走 `src/domain/settings.ts` + `src/ports/settings-port.ts` + `src/host/settings-adapter.ts`（写 `$DSH_HOME/dsh-mcp-bridge/settings.json`，与归属表 `state.json` 分开），TUI 放 `src/tui/` 而非 `src/cli/`。`locale/` 与 `icon.svg` 已在第 ④ 步建好，`package.json` 的 `files` 已同步补全（C6 关闭）。
+第 1 阶段**不建**：`src/config/`、`src/cli/`。第 ④ 步的落地形态与原计划不同：设置持久化走 `src/domain/settings.ts` + `src/ports/settings-port.ts` + `src/host/settings-adapter.ts`（写 `$DSH_HOME/codex-dsh-dispatch/settings.json`，与归属表 `state.json` 分开），TUI 放 `src/tui/` 而非 `src/cli/`。`locale/` 与 `icon.svg` 已在第 ④ 步建好，`package.json` 的 `files` 已同步补全（C6 关闭）。
 
 `src/tui/` 与 `bin/` 是**进程外的配置客户端**，不在插件运行期依赖链上：`src/tui/**` 只允许 import `src/domain/**`（`ALLOWED_TARGETS` 的 `tui → {domain}`），`bin/` 是纯 JS 启动脚本，不参与 `tsc`。
+
+接入向导（`setup.ts`）与它用到的四个模块同样在 `src/tui/` 内，只依赖 Node 内置能力与 `@inquirer/prompts`：它们读写的是**用户自己的** Codex 配置与 AGENTS.md，不碰 DSH profile、不碰插件运行期状态，因此不需要新增层级，也不改变 `ALLOWED_TARGETS`。插件加载与 `npm install` 都不会调用这些模块——只有用户显式执行命令并确认后才写盘。
 
 ## 3. 依赖规则（可机械校验）
 
@@ -190,11 +197,22 @@ export interface WaitOutcome {
   truncated: boolean
 }
 
-/** 游标之后的回合进展：已开始的最大回合号 + 全部回合结束事件。 */
+/** 游标之后的回合进展：落点回合 + 已开始的最大回合号 + 全部回合结束事件。 */
 export interface TurnProgress {
+  /**
+   * 本请求实际落进的回合号，由原生事件认出（见第 6.2 节）。
+   *
+   * - `undefined`：还没看到能证明落点的事件，上层按 `T0 + 1` 兜底推算。
+   * - `null`：事件里明确看到还没进入任何回合，直接判 `pending`。
+   */
+  targetTurn?: number | null
+  /** 是否在原生事件里认出了本请求的投递（`user/message` 或 `agent/inbox/spliced`） */
+  admitted?: boolean
   startedTurn: number | null
   /** 必须是全部 `turn/end`，不能只留最新一条，理由见第 6.2 节 */
   ends: readonly TurnEndInfo[]
+  /** 事件翻页是否被截断；截断时不得把「没看到」当成「不存在」 */
+  truncated: boolean
 }
 ```
 
@@ -268,7 +286,7 @@ export interface SessionRecord {
   readonly lastRequestId: string
   /** 最近一次从源取得的权限值，只用于「源权限是否真的变了」的比较 */
   readonly lastSourcePermission: PermissionLevel | null
-  /** 最近一次提交前读到的 lastTurn，即回合归属的 T0 */
+  /** 最近一次提交前读到的 lastTurn，即回合归属的兜底基线 T0（主判据见第 6.2 节） */
   readonly baselineTurn: number
   /** 最近一次提交前读到的会话游标 */
   readonly baselineCursor: number
@@ -284,7 +302,7 @@ export interface SessionRegistryPort {
 
 **为什么归属关系必须自己记**：宿主不提供「这个会话是谁建的」查询，而 DEVELOPMENT.md 第 9 节要求「只操作本插件创建或用户明确授权接管的会话」。宿主 `sessionController.list()` 返回全部会话，无法区分来源。
 
-**为什么 `baselineTurn` 与 `baselineCursor` 必须落盘**：回合归属的判定式是「对应回合 = `T0 + 1`」（第 6.2 节），而 `dsh_wait` 与 `dsh_cancel` 都是**后续独立请求**——不持久化 T0，插件重载后只能重新猜，会把别的回合算成本请求的（风险 R5）。`baselineCursor` 是读回合进展的起点：若改用客户端回传的 `cursor`，当该回合开始得早于首次 `dsh_wait` 时就会漏掉 `turn/start`。
+**为什么 `baselineTurn` 与 `baselineCursor` 必须落盘**：回合归属的主判据是原生事件里的 `rpcId`/`callId`，认不出来时才按「对应回合 = `T0 + 1`」兜底推算（第 6.2 节），两条路都要用 T0，而 `dsh_wait` 与 `dsh_cancel` 都是**后续独立请求**——不持久化 T0，插件重载后只能重新猜，会把别的回合算成本请求的（风险 R5）。`baselineCursor` 是读回合进展的起点：若改用客户端回传的 `cursor`，当该回合开始得早于首次 `dsh_wait` 时就会漏掉 `turn/start`。
 
 **为什么只记这七个字段**：`canonicalCwd` 是占用判定的键、`lastRequestId` 是冲突回显、`lastSourcePermission` 是权限「仅变化时同步」的比较基线、两个 baseline 是回合归属的锚点；其余一律不存——不复制会话内容、不缓存状态机、不存模型密钥（DEVELOPMENT.md 第 7 节「只存最小元数据，不复制第二份会话数据库」）。`running`、`status`、`cursor` 全部实时读宿主，不从登记表推断。
 
@@ -363,16 +381,24 @@ export interface SessionRegistryPort {
   "sessionId": "……",
   "requestId": "……",
   "text": "……",                    // 普通补充
+  "mode": "queue",                 // 可选，只配合 text；queue（缺省）/ steer
   "reply": { "callId": "……", "answers": [ { "id": "……", "selected": ["……"] } ] },
   "sourcePermission": "ask"        // 可选
 }
-// output：{ sessionId, requestId, cursor, status, permission }
-// 不含 workspaceId/cwd，也不含 model（理由见下）
+// output：{ sessionId, requestId, cursor, status, permission, model, mode? }
+// mode 只在 text 提交时回显；不含 workspaceId/cwd（理由见下）
 ```
 
 **为什么 `dsh_send` 也返回 `cursor`**：客户端拿到 `dsh_send` 结果后通常紧接着 `dsh_wait`。没有 `cursor` 就只能猜 `-1`，而 `-1` 会让 `dsh_wait` 从头重放已裁剪过的历史（`assistantOutput` 的 `afterSeq` 语义）。返回本次提交后读到的新游标，客户端原样回传即可。
 **为什么 `dsh_send` 不返回 `workspaceId`/`cwd`**：这两个值在 `dsh_start` 已经给过，会话不变它们就不变；重复返回只是让客户端多一份可能过期的副本。
-**为什么 `dsh_send` 不返回 `model`**：`dsh_send` 不接受模型参数，而第 1 阶段无法回读会话当前生效的模型（`ModelPort.currentSelection` 恒为 `null`，见 `src/host/model-adapter.ts`）。返回一个恒为 `unknown` 的字段会让客户端误以为「模型被改过」，不如不返回——这与全仓「读不到就不猜」的约定一致。第 2 阶段接入 `modelSelection` 投影回读后再补。
+**为什么 `dsh_send` 返回 `model`**：它不接受模型参数，但提交后可以从宿主回读当前生效值（`ModelPort.currentSelection`），返回的是**观察结果**而不是「本次改了模型」。客户端因此能知道这次跑在哪个模型上；读不到时按既有约定给 `unknown`，不猜。
+
+**`mode` 的语义**：`mode` 直接透传宿主 `prompt` 的原生 `mode`，桥接层不重启会话、不先取消再重发。
+
+- `queue`（缺省）：排队，等当前回合结束后再执行。不写 `mode` 与写 `queue` 完全等价，加入该字段前的调用行为不变。
+- `steer`：插进当前正在执行的回合，由宿主在可接受的边界注入。**不保证立刻打断正在执行的工具调用**，`accepted` 只表示受理，终态仍要等 `turn/end`（见第 6.2 节）。
+- `mode` 只配合 `text`；`reply` 走提问回答通道，同时给 `mode` → `invalid-argument`。
+- `mode` 参与 `requestId` 冲突校验：同一 `requestId` 换了 `mode` 属于不同提交，按冲突拒绝；重放时按记录里的原方式回显。
 
 **`reply` 的语义（第 ④ 步接入，`src/app/send-task.ts:100-110`）**：`reply` 走宿主原生 `UserQuestionService.answer(agent, callId, answer)`，**不是**把答案当普通 prompt 发出去。两条路径的差别是本质的：
 
@@ -415,10 +441,11 @@ export interface SessionRegistryPort {
 - `pendingInput` 非空但详细载荷读不到时仍报 `needs_input`，`needsInput` 降级为 `{ kind: <按上述优先级>, callId: null, questions: [] }`；**不得因为读不到细节就退回 `running`**。
 - 两条读取路径互相独立、失败互不传染：`pendingInput` 走 `sessionController.state()`，提问详情走 `sessionProjections.stateOf(session, 'userQuestions')`。任一路读不到都只降级，不让 `dsh_wait` 整体失败。
 - `dsh_start` / `dsh_send` 的返回体**平铺** `model` 与 `permission`，不套 `config` 包裹层；`permission` 用 `level` 而非 `value`（理由见 5.1）。
-- `dsh_send` 的返回体**必须含 `cursor`**（提交后读到的新游标），否则客户端无法直接接着 `dsh_wait`；不含 `workspaceId`/`cwd`（`dsh_start` 已给过，会话不变它们就不变），也不含 `model`（`dsh_send` 不接受模型参数，第 1 阶段又无法回读生效模型，返回恒 `unknown` 的字段会误导）。
+- `dsh_send` 的返回体**必须含 `cursor`**（提交后读到的新游标），否则客户端无法直接接着 `dsh_wait`；不含 `workspaceId`/`cwd`（`dsh_start` 已给过，会话不变它们就不变）。`model` 是**提交后从宿主回读的实际生效值**，与 `dsh_start` 一样平铺返回——它不接受模型参数，回读只为让客户端知道这次跑在哪个模型上。文字提交还会回显本次实际使用的 `mode`，`reply` 不带该字段。
 - **`-32602` 与 `isError` 的界线**：工具**根本没跑起来**（缺 `name`、未知工具名、`arguments` 非对象、缺 `cwd`、`cwd` 非绝对路径、`requestId` 为空、`model` 只给一半）→ JSON-RPC `-32602 INVALID_PARAMS`；工具**跑起来但业务失败**（`workspace-busy`/`session-not-found`/`turn-missing`/`wait-timeout`/`host-capability-missing`/`internal`）→ HTTP 200 + `result.isError = true`。`-32600 INVALID_REQUEST` 只用于「这压根不是合法 JSON-RPC 请求」（非对象、`jsonrpc` 不是 `"2.0"`、`method` 非字符串）。
 - **`model-unavailable` / `reasoning-effort-unavailable` / `saved-model-invalid` / `permission-unavailable` 四个码走 `-32602`**：它们虽然发生在工具执行期，但对客户端而言都是「你的参数与当前环境不匹配，换参数才能继续」，与「任务执行失败」不是同一类。
 - **`text` 与 `reply` 严格互斥**：两者都传或都不传 → `invalid-argument`。`reply` 必须走原生 `userQuestions.answer`，**不得降级成普通 prompt**——降级会让客户端以为回答已送达，而模型仍在等一个不会来的答案。`reply` 被拒时 `detail.reason` ∈ `not-pending` / `already-queued` / `bad-answer` / `caller-not-live`。
+- **`mode` 只配合 `text`**：`mode` ∈ `queue`（缺省）/ `steer`，直接透传宿主 `prompt` 的原生 `mode`，桥接层不重启、不先取消再重发。`reply` 走提问回答通道，同时给 `mode` → `invalid-argument`。`mode` 参与 `requestId` 冲突校验：同一 `requestId` 换了 `mode` 属于不同提交，按冲突拒绝；不写与写 `queue` 完全等价。
 
 ### 5.6 `config.*.source` 的取值语义
 
@@ -494,7 +521,7 @@ const SUPPORTED_PROTOCOL_VERSIONS = [
 
 TUI 与其它本机配置客户端走这条**独立于 MCP 端点**的 REST 路由（`src/transport/settings-route.ts`，常量 `SETTINGS_ROUTE_PATH` 在 `src/transport/route.ts`）。
 
-**为什么不复用 `/mcp/dsh-mcp-bridge`**：那条路径说的是 MCP 协议（JSON-RPC 帧、`initialize` 握手、`tools/call`），而设置是普通 REST 语义（`GET` 读快照、`PUT` 写默认值）。混进 MCP 端点会让一个只认 JSON-RPC 的客户端把设置请求当成非法帧，也会让分派器多出一堆「不是工具调用但要处理」的分支。
+**为什么不复用 `/mcp/codex-dsh-dispatch`**：那条路径说的是 MCP 协议（JSON-RPC 帧、`initialize` 握手、`tools/call`），而设置是普通 REST 语义（`GET` 读快照、`PUT` 写默认值）。混进 MCP 端点会让一个只认 JSON-RPC 的客户端把设置请求当成非法帧，也会让分派器多出一堆「不是工具调用但要处理」的分支。
 
 | 方法 | 语义 | 成功响应 |
 |---|---|---|
@@ -575,35 +602,49 @@ function decideDesktopBrowserAccess(access, request) {
 
 ### 6.2 回合归属
 
-提交前读一次 `lastTurn` 记为 `T0`。**对应回合固定为 `T0 + 1`**——不是「游标后第一个 `turn > T0`」，也不是「游标后最大 turn」。
+当前原生适配器按**实际消费输入的事件**确定回合，不把进入收件箱当成已经开始执行。
 
-- 已开始判据：`startedTurn >= T0 + 1`（回合号单调递增，`T0 + 2` 已开始则 `T0 + 1` 必然开始过）。
-- 结束匹配：在游标后观察到的**全部** `turn/end` 里按 `turn === T0 + 1` 精确查找，命中即按 `reason` 翻译。
+提交前读一次 `lastTurn` 记为 `T0`，它只是兜底基线。真正的落点回合由适配器从游标后的事件里认出（`src/host/session-adapter.ts` 的 `toProgress`）：
+
+| 事件 | 命中条件 | 落点 |
+|---|---|---|
+| `user/message` | `source.rpcId` 或回复的 `source.callId` 命中本请求 | 该消息所在回合（`currentTurn`） |
+| `agent/inbox/spliced` | `inserted` 中的来源命中本请求 | 只记已接收，不设置落点回合 |
+
+真实排队记录中，`agent/inbox/spliced` 可以在前一回合尚未结束时出现，也可以早于第一个 `turn/start`。若在这里设置落点，就会把前一回合的结束误报为排队请求完成。只有消费输入的 `user/message` 能建立本请求与实际回合的对应关系。
+
+判定规则：
+
+- 认出落点 → `targetTurn = 落点回合号`，结束匹配按 `turn === targetTurn` 精确查找。
+- 尚无匹配的消费事件 → `targetTurn = null`，保持 `pending`，不把其他回合的结束当作本请求完成。
+- 只有旧调用方不提供 `targetTurn` 时，领域函数才保留 `T0 + 1` 的兼容语义；当前原生适配器不走这条分支。
 - 该回合 `turn/end` 未出现（`openTurnStartSeq` 指向它）→ 仍在执行。
-- 出现 `turn > T0` 之前会话就 `idle` 且无 `pendingInput` → 异常路径，报 `failed`（`reason: 'turn-missing'`），不得报 `completed`。
-- **读不到回合边界时按保守值处理**：适配器在 `agents` / `sessions` 服务缺失或 `turnBoundaryOf` 抛错时，返回 `{ openTurnStartSeq: null, lastTurn: 0 }` 而**不是抛错**。这样上层稳定落入 `turn-missing` 失败路径，而不是因为读不到边界就把「没有结束事件」误判成「回合已结束 → `completed`」。这是 R1 风险的兜底行为，不是可选优化。
+- `idle` 本身不能证明尚未消费的请求已经执行或完成。
 
-**为什么必须固定 `T0 + 1` 而不是「最大 turn」**：游标之后若连跑多个回合（`mode: 'queue'` 排队，或用户在 DSH 界面手动又发了一条），「游标后观察到的最大 turn」会是 `T0 + 2`，此时
+**`turn/end` 的下界是 `>= T0`，不是 `> T0`**：`steer` 与 `reply` 落在提交时那个已打开的回合上，它的结束事件回合号正好等于 `T0`。用 `> T0` 会把这个结束事件过滤掉，任务永远停在 `running`。`queue` 不受影响——它新开回合，`turn/start` 必然在窗口内把 `currentTurn` 推到新回合号，旧回合的结束事件因回合号不匹配而被忽略。
+
+**为什么不能只用「最大 turn」**：游标之后若连跑多个回合（`queue` 排队，或用户在 DSH 界面手动又发了一条），「游标后观察到的最大 turn」会是 `T0 + 2`，此时
 
 - `end.turn === T0 + 1`（本回合已结束）但 `end.turn !== T0 + 2` → 被误判为 `running`，**漏报已完成**；
 - `end.turn === T0 + 2`（下一回合已结束）→ 被误判为 `ended`，**把下一回合的结果算成本请求的**。
 
-两种误判方向相反，但都会让 Codex 拿到错误的终态。因此端口层的 `TurnProgress` 必须携带**全部** `turn/end`（`ends: readonly TurnEndInfo[]`），而不是只保留最新一条——只留最新一条时，`T0 + 1` 的结束事件会被 `T0 + 2` 覆盖掉，判定式再正确也无从匹配。
+两种误判方向相反，但都会让 Codex 拿到错误的终态。因此端口层的 `TurnProgress` 必须携带**全部** `turn/end`（`ends: readonly TurnEndInfo[]`），而不是只保留最新一条——只留最新一条时，落点回合的结束事件会被下一回合覆盖掉，判定式再正确也无从匹配。
 
-**`dsh_send` 的 `reply` 是唯一改变基线算法的分支**（`src/app/send-task.ts` 的 `replyBaselineTurn`）：
+**三种提交方式的落点**：
 
-| 提交方式 | 目标回合 | 基线 `T0` 取值 | 理由 |
-|---|---|---|---|
-| `text`（`prompt({ mode: 'queue' })`） | `lastTurn + 1` | `lastTurn` | 排队等当前回合结束再新开一回合，`T0 + 1` 就是它 |
-| `reply`（`userQuestions.answer`） | 当前开放回合 `lastTurn` | `lastTurn - 1` | 答案是 steering 消息，塞进**正在执行**的回合，不会新开回合；若仍用 `lastTurn` 当基线，`expectedTurn` 会永远等 `lastTurn + 1`，而那个回合根本不会出现 |
+| 提交方式 | 落点回合 | 靠什么认出 |
+|---|---|---|
+| `dsh_start` / `dsh_send` 的 `text` + `mode: 'queue'` | 实际消费该消息的新回合，可能晚于 `T0 + 1` | `user/message` 的 `rpcId` |
+| `dsh_send` 的 `text` + `mode: 'steer'` | 原生消费消息的回合，可能等于 `T0` | 同上 |
+| `dsh_send` 的 `reply` | 原生消费答案的回合 | `user/message` 的 `callId` |
 
-`reply` 时若会话此刻没有开放回合（`openTurnStartSeq` 为 `null`，理论上不该发生，但宿主状态可能已变），退回 `text` 的算法：把答案当成下一回合的输入，等它开新回合。这是保守兜底，不是正常路径。
+`steer` 由宿主在可接受的边界注入，**不保证立刻打断正在执行的工具调用**；`accepted` 只表示受理，不代表已生效，终态仍要等 `turn/end`。
 
 ### 6.3 六态翻译
 
 | 原生事实 | 桥接状态 |
 |---|---|
-| `prompt` 已接收，尚未观察到 `turn > T0` 的 `turn/start` | `accepted` |
+| `prompt` 已接收，尚未观察到落点回合的 `turn/start` | `accepted` |
 | 对应回合 `openTurnStartSeq` 非空 | `running` |
 | `pendingInput` 非空（含审批与提问），且对应回合未结束 | `needs_input` |
 | `turn/end.reason.kind === 'completed'` | `completed` |
@@ -649,7 +690,7 @@ cwd 被占用 ⟺ 该 cwd 下存在本插件创建、且 readState(sessionId).ru
 需要持久化的最小元数据只有归属关系：
 
 ```jsonc
-// $DSH_HOME/dsh-mcp-bridge/state.json
+// $DSH_HOME/codex-dsh-dispatch/state.json
 {
   "version": 1,
   "sessions": {
@@ -827,7 +868,7 @@ cwd 被占用 ⟺ 该 cwd 下存在本插件创建、且 readState(sessionId).ru
 | 方案 | 做法 | 为什么不选 |
 |---|---|---|
 | 设置走 MCP 的 `tools/call` | 加 `dsh_settings_get` / `dsh_settings_set` 两个工具 | 设置不是「把任务委派给 DSH 会话」，塞进工具面会让 MCP 客户端把配置操作当任务；且 `tools/list` 会多出与任务无关的条目 |
-| 设置路由与 MCP 路由共用 `/mcp/dsh-mcp-bridge` | 按 `Content-Type` 或路径后缀区分 | 分派器要多出一堆「不是 JSON-RPC 帧但要处理」的分支，且只认 JSON-RPC 的客户端会先撞上非法帧 |
+| 设置路由与 MCP 路由共用 `/mcp/codex-dsh-dispatch` | 按 `Content-Type` 或路径后缀区分 | 分派器要多出一堆「不是 JSON-RPC 帧但要处理」的分支，且只认 JSON-RPC 的客户端会先撞上非法帧 |
 | **独立 REST 路由 `/mcp/settings`** | `GET` 读快照、`PUT` 写默认值，复用 `auth.ts` 的围栏 | 语义清晰；认证围栏复用而非复制；MCP 端点保持纯净 |
 | TUI 直接读写 `settings.json` | 绕过 HTTP，直接读 `$DSH_HOME` 下的文件 | 违反「不与插件各存一份配置」；且会绕过插件的校验（模型在不在目录里、预设可不可用），写进去的坏值只有在下次派单时才暴露 |
 | TUI 起 raw-mode 单键界面 | 方向键选择、即时刷新 | Windows 的 `cmd`/PowerShell 对 raw mode 支持不一致（方向键序列、Ctrl 组合各不相同）；本界面只有三个下拉项与三个按钮，行命令足够且可复制粘贴、可脚本化 |
@@ -838,7 +879,7 @@ cwd 被占用 ⟺ 该 cwd 下存在本插件创建、且 readState(sessionId).ru
 1. 设置路由独立成 `SETTINGS_ROUTE_PATH = '/mcp/settings'`，实现在 `src/transport/settings-route.ts`，认证复用 `src/transport/auth.ts` 的 `checkRequest`。
 2. 传输层只接收 `SettingsHandlers { read, write }` 两个回调，**不 import `src/app/**`**（D5）；组装根 `src/index.ts` 把 `readSettings` / `writeSettings` 包成回调注入。
 3. TUI 放 `src/tui/`，在 `scripts/check-boundaries.mjs` 的 `ALLOWED_TARGETS` 里登记 `['tui', new Set(['domain'])]`——只许依赖最内层的纯类型与纯函数。
-4. CLI 入口是 `bin/dsh-mcp-bridge.mjs`（零依赖、零构建的启动脚本，动态 `import('../lib/tui/main.js')`），`package.json` 的 `bin` 指向它，`files` 补 `bin`。
+4. CLI 入口是 `bin/codex-dsh-dispatch.mjs`（零依赖、零构建的启动脚本，动态 `import('../lib/tui/main.js')`），`package.json` 的 `bin` 指向它，`files` 补 `bin`。
 
 **影响**：
 

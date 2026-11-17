@@ -52,7 +52,7 @@ export type {
   QuestionAnswer,
   QuestionOption,
 } from './interaction-port.js'
-export type { SessionRecord, SessionRegistryPort } from './registry-port.js'
+export type { RequestRecord, SessionRecord, SessionRegistryPort } from './registry-port.js'
 export type { ReadSettingsInput, SettingsPort, WriteSettingsInput } from './settings-port.js'
 
 /** 应用层可用的全部宿主能力。 */

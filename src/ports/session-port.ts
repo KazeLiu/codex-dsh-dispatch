@@ -74,6 +74,11 @@ export interface ReadStateInput {
  *
  * `afterSeq` 取「提交前观察到的游标」：只关心这次提交之后出现的
  * `turn/start` 与 `turn/end`，更早的回合与本请求无关。
+ *
+ * 落点回合不由本接口推算：适配器从原生事件里认出本请求落在哪个回合
+ * （`user/message` 的 `source.rpcId`、`agent/inbox/spliced` 的 `inserted`），
+ * 通过 `TurnProgress.targetTurn` 回传。`steer` 与 `reply` 会被宿主插进
+ * **提交时已经打开的那个回合**，落点回合号可能正好等于 `sinceTurn`。
  */
 export interface ReadProgressInput {
   readonly sessionId: string
@@ -82,7 +87,11 @@ export interface ReadProgressInput {
   /** 只读 `seq > afterSeq` 的事件；首次传 `-1`。 */
   readonly afterSeq: number
   /**
-   * 只关心回合号大于它的 `turn/end`（调用方传提交前的 `lastTurn`，即 T0）。
+   * 回合号下界（调用方传提交前的 `lastTurn`，即 T0）。
+   *
+   * 适配器收集**回合号大于等于它**的 `turn/end`：下界取 `>=` 而不是 `>`，
+   * 因为 `steer` / `reply` 落在提交时那个开放回合上，它的结束事件回合号
+   * 就等于 T0；用严格大于会永远看不到这条结束事件。
    *
    * 传进来而不是让适配器自己判断：T0 属于领域语义（回合归属），
    * 适配器只负责「按回合号下界取原生事实」。

@@ -11,5 +11,5 @@
 # inject 会让插件在服务缺失时根本不加载。改为调用时 `ctx.get()` 惰性读取。
 
 - insert:
-    - id: dsh-mcp-bridge
-      name: 'dsh-mcp-bridge'
+    - id: codex-dsh-dispatch
+      name: 'codex-dsh-dispatch'

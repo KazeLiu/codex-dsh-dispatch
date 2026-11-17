@@ -8,7 +8,7 @@
  * 注意：本层只允许类型声明（依赖规则 D3）。
  */
 
-import type { PermissionLevel } from '../domain/types.js'
+import type { PermissionLevel, PromptMode } from '../domain/types.js'
 
 export interface RequestRecord {
   readonly kind: 'start' | 'text' | 'reply'
@@ -16,6 +16,13 @@ export interface RequestRecord {
   readonly baselineTurn: number
   readonly baselineCursor: number
   readonly phase: 'prepared' | 'accepted'
+  /**
+   * 文字提交的投递方式；`reply` 走提问回答通道，没有该字段。
+   *
+   * 必须持久化：重放时要按原方式回显，且同一 requestId 换方式要按冲突拒绝。
+   * 早期记录没有该字段，读取时按 `queue` 兜底——那正是当时的固定行为。
+   */
+  readonly mode?: PromptMode
   readonly callId?: string
 }
 

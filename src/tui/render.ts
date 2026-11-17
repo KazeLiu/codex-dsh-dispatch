@@ -33,7 +33,7 @@ export function render(state: TuiState): string {
 
 /** 标题行：左标题、右连接状态。 */
 function renderHeader(state: TuiState): string[] {
-  const title = 'DSH MCP Bridge'
+  const title = 'Codex DSH Dispatch'
   const status = connectionLabel(state)
   const padding = Math.max(1, WIDTH - displayWidth(title) - displayWidth(status))
   return [title + ' '.repeat(padding) + status]
@@ -57,8 +57,8 @@ function renderConnectionError(error: string): string[] {
     `    ${error}`,
     '',
     '  请确认：',
-    '    1. DSH 正在运行，且已加载 dsh-mcp-bridge 插件；',
-    '    2. 环境变量 DSH_MCP_BRIDGE_TOKEN 已设置，且与本机客户端一致。',
+    '    1. DSH 正在运行，且已加载 codex-dsh-dispatch 插件；',
+    '    2. 环境变量 CODEX_DSH_DISPATCH_TOKEN 已设置，且与本机客户端一致。',
   ]
 }
 

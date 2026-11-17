@@ -6,7 +6,7 @@ import { applySnapshot, currentModel, isDirty, selectEffort, selectModel, select
 /** 所有列表都取自当前 DSH；方向键选择，Enter 确认。 */
 export async function runConfigTui(config: ClientConfig = readClientConfig()): Promise<number> {
   let state = applySnapshot(await fetchSettings(config))
-  console.log('DSH MCP Bridge · 默认设置（↑↓ 选择，Enter 确认，Ctrl+C 退出）')
+  console.log('Codex DSH Dispatch · 默认设置（↑↓ 选择，Enter 确认，Ctrl+C 退出）')
   try {
     for (;;) {
       const snapshot = state.snapshot!

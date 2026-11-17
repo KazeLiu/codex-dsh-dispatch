@@ -1,6 +1,6 @@
 {
   "meta": {
-    "title": "DSH MCP Bridge",
+    "title": "Codex DSH Dispatch",
     "description": "Expose DSH session capabilities to Codex and other MCP clients over a loopback MCP service: start tasks, wait for results, send follow-ups and cancel, all through native DSH sessions."
   }
 }

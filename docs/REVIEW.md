@@ -1,5 +1,7 @@
 # 架构评审：一致性、风险与阶段衔接
 
+> **改名说明（后加）**：本文记录的是 2026-11-17 当时的实际操作，命令、路径与 MCP 名称均为当时的旧名 `dsh-mcp-bridge` / `dsh`。项目现已统一改名为 `codex-dsh-dispatch`，旧命令、旧登记、旧数据目录一律作废，需要按 [安装与接入](INSTALL.md) 的「从旧名升级」重做一次。本文的历史事实保持原样，未按新名改写。
+
 评审基线：`docs/ARCHITECTURE.md`（分层、依赖规则、端口契约、MCP 工具面、状态机、ADR）。
 评审对象：`package.json`、`tsconfig.json`、`scripts/check-boundaries.mjs`，以及后端落地的 `src/` 树。
 

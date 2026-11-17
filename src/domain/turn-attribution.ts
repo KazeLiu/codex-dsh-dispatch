@@ -5,13 +5,19 @@
  * 不代表任何回合已经开始；而 `SessionState.running === false` 也不代表本请求
  * 对应的回合已经结束——它可能还没开始，或者会话里跑的是别的回合。
  *
- * 判定方式：提交前读一次 `lastTurn` 记为 T0，**对应回合固定为 T0 + 1**。
- * 为什么不是「游标后观察到的第一个回合」：`mode: 'queue'` 允许排队，用户在
- * DSH 界面里手动再发一条就会让游标后连跑多个回合；此时「第一个」需要投影侧
- * 额外记录最小值，而 T0 + 1 由 `lastTurn` 的语义直接给出，无需额外状态。
+ * 判定方式分两级，**原生事件优先**：
+ * 1. 适配器从实际消费输入的 `user/message` 按 `rpcId` / `callId` 认出回合，
+ *    通过 `targetTurn` 传进来。收件箱插入事件只证明接收，不作为回合归属。
+ *    `steer` 与 `reply` 可能落入提交时已打开的回合，回合号可以等于 T0。
+ * 2. `targetTurn` 缺省时保留旧调用方的 T0 + 1 语义；当前原生适配器总会
+ *    显式返回回合号或 null，不会对尚未消费的排队消息使用这个推算。
  *
- * 结束事件的匹配也因此不能用「最新一条 turn/end」：连跑两回合时最新那条属于
- * 下一回合。所以输入收的是**游标后全部** `turn/end`，按回合号精确匹配。
+ * `targetTurn === null` 表示「事件里明确看到本请求还没进入任何回合」，
+ * 与「缺省、不知道」不同，前者直接判 `pending`。
+ *
+ * 结束事件的匹配也不能用「最新一条 turn/end」：连跑两回合时最新那条属于
+ * 下一回合。所以输入收的是**游标后全部** `turn/end`（含回合号等于 T0 的那条，
+ * 因为 `steer` / `reply` 的落点就是它），按回合号精确匹配。
  */
 
 import type { TurnEndInfo, TurnEndKind } from './types.js'
@@ -59,7 +65,8 @@ function findEnd(ends: readonly TurnEndInfo[], turn: number): TurnEndInfo | null
 /**
  * 判定请求对应的回合进展。
  *
- * 「已开始」的判据是 `startedTurn >= 对应回合号`：既然 T0+2 都已经开始，
+ * 有 `targetTurn` 时以它为准（原生事件认出的落点）；否则按 T0 + 1 推算，
+ * 此时「已开始」的判据是 `startedTurn >= 对应回合号`：既然 T0+2 都已经开始，
  * T0+1 必然已经开始过（回合号单调递增）。这样即使投影侧只保留最大值也够用。
  */
 export function attributeTurn(input: AttributionInput): Attribution {

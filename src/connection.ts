@@ -6,7 +6,7 @@ import { randomBytes } from 'node:crypto'
 export interface Connection { readonly url: string; readonly token: string }
 
 export function connectionFile(home = process.env['DSH_HOME'] ?? join(homedir(), '.dsh')): string {
-  return join(home, 'dsh-mcp-bridge', 'access.json')
+  return join(home, 'codex-dsh-dispatch', 'access.json')
 }
 
 export async function readConnection(home?: string): Promise<Connection> {
@@ -20,7 +20,7 @@ export async function readConnection(home?: string): Promise<Connection> {
 }
 
 export async function accessToken(home?: string): Promise<string> {
-  const configured = process.env['DSH_MCP_BRIDGE_TOKEN']
+  const configured = process.env['CODEX_DSH_DISPATCH_TOKEN']
   if (configured !== undefined && configured.trim() !== '') return configured
   try { return (await readConnection(home)).token }
   catch (cause) {
