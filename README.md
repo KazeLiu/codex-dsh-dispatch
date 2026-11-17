@@ -1,51 +1,69 @@
 # dsh-mcp-bridge
 
-让 Codex 等 MCP 客户端委派任务给 DeepSeek Harness（DSH），等待执行结果，并在原 DSH 会话中继续沟通和返工。
-
-目标工作方式：**GPT 规划与审查，DSH 原生执行，MCP 传递任务与反馈。** 不再手动复制两边的会话，也不把 DeepSeek 当作 Codex 原生子代理运行。
+在 Codex 中把任务交给 DeepSeek Harness（DSH），等待结果，并在原 DSH 对话里继续补充和返工。DSH 使用自己的模型、工具和执行循环。
 
 ```text
-Codex / 其他 MCP 客户端
-          ↕ Streamable HTTP MCP（本机）
-   dsh-mcp-bridge（DSH 插件）
-          ↕ DSH 原生会话服务
-   DSH 会话、模型、工具与执行循环
+Codex ── stdio MCP ── 本机代理 ── 回环 HTTP MCP ── DSH 插件
+                                                   │
+                                              DSH 原生会话服务
 ```
 
-## 当前状态
+插件只监听自己的本机回环端口，不使用 DSH 的网页端口，**无需开启“允许浏览器访问”**。MCP 协议和客户端使用官方 TypeScript SDK。
 
-**代码已完成，尚未联调。**
+## 在 CMD 中选择默认模型与思考强度
 
-- 插件本体（`src/` 51 个 `.ts`）与进程外配置客户端（`dsh-mcp-bridge config`）均已落盘：四个任务工具 `dsh_start` / `dsh_wait` / `dsh_send` / `dsh_cancel`、六态状态机、设置读写路由 `/mcp/settings`、TUI 与 CLI 入口。
-- `npm run typecheck`（依赖边界校验 + `tsc --noEmit`）与 `npm run build` 双绿；离线冒烟 5 组共 89 项通过（协议分派、错误码分界、传输层状态码、六态映射、回合归属、输出裁剪、权限三层解析）。
-- **但插件从未被 DSH 真实加载过，也从未接过真实 MCP 客户端。** 按开发文档第 10 节第 6 条，真实闭环通过前不声称插件可用、不发布正式版本。
+保持 DSH 运行，打开 CMD，执行：
 
-下一步是获授权联调（第 ⑤ 步）。联调有两个硬前置：DSH 桌面端设置里打开「允许浏览器访问」（默认关闭，关闭时请求在到达插件之前就被 `403` 拦下），以及启动 DSH 前设置 `DSH_MCP_BRIDGE_TOKEN`。逐条未验证项见 [安装与接入](docs/INSTALL.md) 第 7 节。
-
-## 安装与快速上手
-
-```bash
-npm install && npm run typecheck && npm run build
+```cmd
+dsh-mcp-bridge config
 ```
 
-把插件目录放进 `~/.dsh/profiles/desktop/node_modules/dsh-mcp-bridge/`，把 `dsh-mcp-bridge` 加进该 profile `package.json` 的 `dsh.profile.bundles`，设好 `DSH_MCP_BRIDGE_TOKEN`，重启 DSH。Codex 侧在 `~/.codex/config.toml` 加一张 `[mcp_servers.dsh_bridge]` 表，用 `bearer_token_env_var` 引用同一个环境变量。
+用 ↑↓ 和 Enter 选择：
 
-完整步骤、卸载与排查见 [安装与接入](docs/INSTALL.md)；设置界面用 `dsh-mcp-bridge config`。
+1. **模型**：输入名称筛选列表，例如 `deepseek-v4.1-flash`，选中对应供应商的模型。
+2. **思考强度**：从该模型实际支持的列表中选择，例如 `low`。
+3. **保存默认值**：保存后立即影响后续桥接新建的 DSH 对话。
 
-## 第一版目标
+选择“跟随 DSH 默认设置”时不固定模型和强度。默认权限支持“请求批准 / 帮我批准 / 完全访问”，仅在调用方无法提供源会话权限时使用。保存设置不修改 DSH 全局默认值，也不覆盖已有对话中的手动设置。
 
-- 创建专用 DSH 会话并提交任务。
-- 首次派单时按实际工作目录复用或注册 DSH 工作区，同项目的不同 Codex 对话使用各自的 DSH 会话。
-- 提供 FastCtx 式终端设置界面，从 DSH 获取模型与思考强度，保存仅供桥接新会话使用的默认值。
-- 同步当前 Codex 对话的“请求批准 / 帮我批准 / 完全访问”三档权限；获取不到时使用设置中的默认权限。
-- 等待对应回合完成、失败或请求输入，获取增量输出。
-- 在同一会话里补充信息、提出修改和返工。
-- 显式取消任务，不因等待超时而重复派单。
+查看模型与支持的强度：
 
-第一版先串行完成一个工作目录中的任务；Codex 审查期间，DSH 不再同时修改同一处代码。
+```cmd
+dsh-mcp-bridge models
+```
 
-未设置桥接模型默认值时跟随 DSH 默认设置；修改默认值不覆盖已有会话，用户仍可在 DSH 中手动调整。设置入口为 `dsh-mcp-bridge config`（已实现，见 [安装与接入](docs/INSTALL.md)）。
+如果 CMD 找不到命令，在源码目录使用：
 
-实现方向、工作区关联、默认值与权限规则、拟定接口及开发顺序见 [开发文档](docs/DEVELOPMENT.md)；安装、Codex 接入、卸载与排查见 [安装与接入](docs/INSTALL.md)。
+```cmd
+cd /d D:\code\dsh-mcp-bridge
+node bin\dsh-mcp-bridge.mjs config
+```
 
-分层边界、模块依赖规则、MCP 工具面契约与架构决策见 [架构落地清单](docs/ARCHITECTURE.md)；一致性评审、风险与阶段衔接见 [架构评审](docs/REVIEW.md)；第 1 阶段的模块划分、数据流、错误处理策略、关键取舍与未验证项见 [实现说明](docs/IMPLEMENTATION.md)。
+## 安装和 Codex 接入
+
+在 DSH 插件管理界面选择“添加插件”，填写已构建的本地目录并启用。桌面版的 desktop Profile 由应用管理，不通过 CLI 或手工编辑安装。
+
+本机 Codex 已登记名为 `dsh` 的 stdio MCP，入口是 `bin/dsh-mcp-bridge.mjs mcp`。代理自动发现插件端口并读取专用认证信息，不需要把凭据填写进 Codex 配置。
+
+完整安装、卸载与故障处理见 [安装与接入](docs/INSTALL.md)。
+
+希望 Codex 负责规划、审查与 bug 纠正，并自动把细节实现交给 DSH，使用 [协作指令与项目规则](docs/WORKFLOW.md)。
+
+## 已验证的闭环
+
+2026-11-17，在 DSH Desktop 2.0.23-next、原生服务 0.2.2-rc.3 上，通过官方 MCP 客户端连接 stdio 代理，创建了使用 `cpr / deepseek-v4.1-flash`、`low` 强度的新对话，实际回答 **`2`**，状态为 `completed`。DSH 全局默认强度仍为 `high`。
+
+CMD 中的模型搜索、强度下拉、默认值保存和退出已实际操作；验证结束后桥接默认值恢复为原来的“跟随 DSH”。详细证据和仍未验证的路径见 [验收记录](docs/ACCEPTANCE.md)。
+
+## 四个任务工具
+
+| 工具 | 用途 |
+| --- | --- |
+| `dsh_start` | 复用或注册工作区，创建专属 DSH 对话并提交任务 |
+| `dsh_wait` | 按请求 ID 和游标等待结果或人工输入 |
+| `dsh_send` | 在原对话中补充任务或回答受支持的提问 |
+| `dsh_cancel` | 显式请求取消，不把接收确认当成已取消 |
+
+同目录共享 DSH 工作区，不同 Codex 对话使用各自的 DSH 会话。本插件只串行协调自己的同目录任务；不锁用户或其他程序的文件操作。
+
+开发要求见 [开发文档](docs/DEVELOPMENT.md)。

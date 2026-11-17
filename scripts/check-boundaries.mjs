@@ -110,8 +110,8 @@ const RULES = [
   },
   {
     id: 'D6',
-    reason: '不得 import @modelcontextprotocol/sdk/*（本机无此包）',
-    check: (_file, spec) => spec.startsWith('@modelcontextprotocol/sdk'),
+    reason: 'MCP SDK 仅用于协议与传输适配',
+    check: (file, spec) => spec.startsWith('@modelcontextprotocol/sdk') && !['mcp', 'transport', 'tui'].includes(file.split('/')[0]),
   },
   {
     id: 'D7',
@@ -123,7 +123,7 @@ const RULES = [
       const resolved = posix.normalize(posix.join(posix.dirname(file), spec))
       const targetLayer = resolved.split('/')[0]
       // 同层内（含子目录回父目录）合法
-      if (targetLayer === layer) return false
+      if (targetLayer === layer || targetLayer === 'connection.js') return false
       // 只允许第 1 节表格声明的向内依赖，其余跨层视为横向跳层
       return !(ALLOWED_TARGETS.get(layer)?.has(targetLayer) ?? false)
     },

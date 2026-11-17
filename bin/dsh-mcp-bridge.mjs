@@ -13,11 +13,13 @@
 const HELP = `用法：dsh-mcp-bridge <命令>
 
 命令：
-  config    打开默认模型 / 思考强度 / 默认权限的设置界面
+  config    打开默认模型 / 思考强度 / 默认权限的下拉设置界面
+  models    显示 DSH 当前模型和支持的思考强度
+  mcp       为 Codex 提供 stdio MCP 接入
 
 环境变量：
-  DSH_MCP_BRIDGE_URL     插件端点，缺省 http://127.0.0.1:7275
-  DSH_MCP_BRIDGE_TOKEN   本机认证凭据（必填，与插件启动时用的一致）
+  默认自动发现本机插件并读取专用认证信息，无需手动填写端口或凭据。
+  DSH_MCP_BRIDGE_URL / DSH_MCP_BRIDGE_TOKEN 可用于显式覆盖设置客户端连接。
 
 说明：
   config 子命令是插件的**配置客户端**：它通过本机认证通道读写插件服务，
@@ -27,12 +29,22 @@ const HELP = `用法：dsh-mcp-bridge <命令>
 async function main(argv) {
   const [command, ...rest] = argv
 
-  if (command === undefined || command === '--help' || command === '-h' || command === 'help') {
+  if (command === '--help' || command === '-h' || command === 'help') {
     process.stdout.write(`${HELP}\n`)
     return 0
   }
 
-  if (command !== 'config') {
+  if (command === 'mcp') {
+    await (await import('../lib/tui/proxy.js')).runMcpProxy()
+    return 0
+  }
+  if (command === 'models') {
+    const { fetchSettings, readClientConfig } = await import('../lib/tui/client.js')
+    const { printModels } = await import('../lib/tui/main.js')
+    printModels(await fetchSettings(readClientConfig()))
+    return 0
+  }
+  if (command !== undefined && command !== 'config') {
     process.stderr.write(`未知命令：${command}\n\n${HELP}\n`)
     return 2
   }
@@ -57,4 +69,5 @@ async function main(argv) {
   return await runConfigTui()
 }
 
-process.exitCode = await main(process.argv.slice(2))
+try { process.exitCode = await main(process.argv.slice(2)) }
+catch (cause) { process.stderr.write(`${cause instanceof Error ? cause.message : String(cause)}\n`); process.exitCode = 1 }
