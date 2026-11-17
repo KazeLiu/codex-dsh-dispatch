@@ -1,0 +1,15 @@
+# cordis.patch.yml — 把本插件插入 DSH profile 的插件树。
+#
+# 约定（与 dsh-config-manager 一致）：
+# - `id` 必须等于 `src/index.ts` 里 `export const name` 的值，否则宿主按 row id
+#   找不到插件，加载会静默跳过。
+# - `name` 是包名，宿主按它 resolve 到 `main`（`./lib/index.js`）。
+# - `package.json` 的 `dsh.bundle.patch` 字段指向本文件，是 CLI 把包追加进
+#   profile `dsh.profile.bundles` 的硬条件；缺了它 `dsh install` 不会带上本文件。
+#
+# 本插件不声明 `inject`：宿主服务（尤其 webServer）可能晚于插件就绪，声明
+# inject 会让插件在服务缺失时根本不加载。改为调用时 `ctx.get()` 惰性读取。
+
+- insert:
+    - id: dsh-mcp-bridge
+      name: 'dsh-mcp-bridge'
