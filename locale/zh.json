@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "DSH MCP 桥接",
+    "description": "把 DSH 的会话能力以本机 MCP 服务暴露给 Codex 等客户端：启动任务、等待结果、补充说明与取消，全程走 DSH 原生会话。"
+  }
+}
