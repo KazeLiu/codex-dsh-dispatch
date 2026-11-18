@@ -18,7 +18,6 @@ import {
   toSavedModel,
   type PersistedSettings,
   type SettingsSnapshot,
-  type SettingsUpdate,
 } from '../domain/settings.js'
 import type { AppDeps } from './deps.js'
 
@@ -42,26 +41,29 @@ export async function readSettings(deps: AppDeps): Promise<SettingsSnapshot> {
  */
 export async function writeSettings(
   deps: AppDeps,
-  update: SettingsUpdate,
+  update: unknown,
 ): Promise<SettingsSnapshot> {
-  const validated = readSettingsUpdate(update)
+  const patch = readSettingsUpdate(update)
+  // 只有本次真的要改的字段才进入校验；`undefined` 表示「保留磁盘上的旧值」。
+  // 单独取成常量是为了让下面的收窄对每个字段都成立（含 `null` 分支）。
+  const { model, permission, workspaceId } = patch
 
   // 目录读不到时跳过校验：此时无法判断模型是否存在，强行拒绝会让用户在
   // 「DSH 还没起来」的情况下连保存都做不到。失效状态留给下次读取时判定。
   const catalog = await readCatalogSafely(deps)
-  if (catalog.entries.length > 0 && validated.model !== null) {
+  if (catalog.entries.length > 0 && model !== null && model !== undefined) {
+    const chosen = model
     const entry = catalog.entries.find(
-      (item) =>
-        item.provider === validated.model?.providerId && item.model === validated.model?.modelId,
+      (item) => item.provider === chosen.providerId && item.model === chosen.modelId,
     )
     if (entry === undefined) {
       throw bridgeError(
         'invalid-argument',
-        `模型 ${validated.model.providerId}/${validated.model.modelId} 不在当前 Profile 中`,
+        `模型 ${chosen.providerId}/${chosen.modelId} 不在当前 Profile 中`,
         { field: 'model' },
       )
     }
-    const effort = validated.model.reasoningEffort
+    const effort = chosen.reasoningEffort
     if (effort !== null && !entry.reasoningEfforts.includes(effort)) {
       throw bridgeError(
         'invalid-argument',
@@ -72,23 +74,36 @@ export async function writeSettings(
     }
   }
 
-  if (validated.permission !== null) {
+  if (permission !== null && permission !== undefined) {
     const presets = deps.ports.permission.availablePresets()
-    const presetId = presetOfLevel(validated.permission)
+    const presetId = presetOfLevel(permission)
     // 可用预设列表为空说明读不到，此时不拦（同上）。
     if (presets.options.length > 0 && !presets.options.some((o) => o.presetId === presetId)) {
       throw bridgeError(
         'invalid-argument',
-        validated.permission === 'auto'
+        permission === 'auto'
           ? '权限档位 "auto" 当前不可用：需要启用自动审查插件（dsh-experimental-auto-review）'
-          : `权限档位 "${validated.permission}" 对应的预设 ${presetId} 当前不可用`,
+          : `权限档位 "${permission}" 对应的预设 ${presetId} 当前不可用`,
         { field: 'permission', presetId },
       )
     }
   }
 
+  if (workspaceId !== null && workspaceId !== undefined) {
+    if (await deps.ports.workspace.resolveWorkspace(workspaceId) === null) {
+      throw bridgeError('invalid-argument', '该工作区已不在当前 DSH 里，请刷新后重新选择。', {
+        field: 'workspaceId',
+        workspaceId,
+      })
+    }
+  }
+
   const written = await deps.ports.settings.write({
-    defaults: { model: validated.model, permission: validated.permission },
+    defaults: {
+      ...(model === undefined ? {} : { model }),
+      ...(permission === undefined ? {} : { permission }),
+      ...(workspaceId === undefined ? {} : { workspaceId }),
+    },
   })
   return composeSnapshot(deps, written)
 }
@@ -105,6 +120,7 @@ async function composeSnapshot(
     dshDefault: catalog.dshDefault,
     availablePresetIds: presets.options.map((option) => option.presetId),
     saved: saved.defaults,
+    workspaces: await deps.ports.workspace.listWorkspaces(),
     catalogError: catalog.error,
   })
 }
@@ -155,6 +171,21 @@ export async function readSavedPermission(
   try {
     const saved = await deps.ports.settings.read({})
     return saved.defaults.permission
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 读「桥接保存的默认工作区 ID」，供 `dsh_start` 省略 cwd 时使用。
+ *
+ * 与模型/权限一致：读失败按「没有保存值」继续，由调用方给出「请去设置里选一个」
+ * 的提示，而不是把一个读取故障说成配置错误。
+ */
+export async function readSavedWorkspaceId(deps: AppDeps): Promise<string | null> {
+  try {
+    const saved = await deps.ports.settings.read({})
+    return saved.defaults.workspaceId
   } catch {
     return null
   }

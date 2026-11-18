@@ -63,13 +63,20 @@ const ALLOWED_TARGETS = new Map([
   ['host', new Set(['domain', 'ports'])],
   ['transport', new Set(['mcp', 'domain', 'ports'])],
   ['mcp', new Set(['app', 'domain', 'ports'])],
-  ['app', new Set(['domain', 'ports'])],
+  ['app', new Set(['domain', 'ports', 'codex'])],
   ['domain', new Set()],
   ['ports', new Set(['domain'])],
+  // Codex 接入层：只碰本机 Codex CLI 与 AGENTS.md，不依赖任何其它层。
+  // 单独成层是因为它同时被插件后端（设置页）与进程外 TUI 使用——
+  // 放进 tui/ 会让后端反向依赖进程外客户端，放进 app/ 又会让 TUI 越层。
+  ['codex', new Set()],
+  // 原生设置页的浏览器端代码：只能依赖最内层的纯类型与纯函数，
+  // 不能碰 node:*（它在浏览器里跑），也不能碰任何后端实现。
+  ['client', new Set(['domain'])],
   // TUI 是**进程外的配置客户端**：它通过本机认证通道读写插件服务，不 import
   // 任何用例层或宿主层模块。只允许依赖最内层的纯类型与纯函数，这样它既不会
   // 绕过插件直接改 profile/会话文件，也不会因为分层漂移而拿到不该有的能力。
-  ['tui', new Set(['domain'])],
+  ['tui', new Set(['domain', 'codex'])],
 ])
 
 /** 每层的禁入规则：层前缀 → 判定函数。 */
@@ -112,6 +119,12 @@ const RULES = [
     id: 'D6',
     reason: 'MCP SDK 仅用于协议与传输适配',
     check: (file, spec) => spec.startsWith('@modelcontextprotocol/sdk') && !['mcp', 'transport', 'tui'].includes(file.split('/')[0]),
+  },
+  {
+    id: 'D8',
+    reason: 'src/client/** 在浏览器里跑，不得 import node:* 或宿主包',
+    check: (file, spec) =>
+      file.startsWith('client/') && (spec.startsWith('node:') || spec.startsWith('@deepseek-ai/')),
   },
   {
     id: 'D7',

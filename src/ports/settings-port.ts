@@ -17,7 +17,13 @@ export interface ReadSettingsInput {
 }
 
 export interface WriteSettingsInput {
-  readonly defaults: SettingsDefaults
+  /**
+   * 只包含本次要改的项。
+   *
+   * 省略的键保留磁盘上的旧值（由适配器在同一个串行段里「读-合并-写」完成）。
+   * 这样老版本 CLI 与只传模型/权限的调用不会顺手清掉别的字段。
+   */
+  readonly defaults: Partial<SettingsDefaults>
 }
 
 export interface SettingsPort {
@@ -30,6 +36,10 @@ export interface SettingsPort {
    */
   read(input: ReadSettingsInput): Promise<PersistedSettings>
 
-  /** 写保存的默认值；写失败抛错（用户主动操作，不能假装成功）。 */
+  /**
+   * 写保存的默认值；写失败抛错（用户主动操作，不能假装成功）。
+   *
+   * 合并语义由实现负责：调用方给的是补丁，不是完整文档。
+   */
   write(input: WriteSettingsInput): Promise<PersistedSettings>
 }

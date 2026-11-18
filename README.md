@@ -8,30 +8,44 @@ Codex ── stdio MCP ── 本机代理 ── 回环 HTTP MCP ── DSH 插
                                               DSH 原生会话服务
 ```
 
-插件只监听自己的本机回环端口，不使用 DSH 的网页端口，**不需要开启「允许浏览器访问」**。MCP 协议走官方 TypeScript SDK。
+MCP 派单通道只监听插件自己的本机回环端口，**不需要开启「允许浏览器访问」**。设置页在 DSH 原生界面内通过宿主网页服务通信；MCP 协议走官方 TypeScript SDK。
 
 ## 安装
 
-需要两件事，互不替代：
+只需要装 DSH 插件：登记 Codex、写协作规则、设默认值都在 DSH 的**设置 → Codex 派单**里点，不需要全局命令、不需要改 PATH。
+
+使用前需安装 Node.js（22.x ≥22.19，或 ≥24.9）及 Codex 官方 CLI。原生设置页从 `0.2.0` 起提供；若按包名安装只得到 `0.1.0`，请改用 `0.2.0` 的本地安装包。
 
 | | 是什么 | 怎么装 |
 | --- | --- | --- |
-| **DSH 插件** | 在 DSH 进程里提供 `/mcp/codex-dsh-dispatch` 服务，真正干活的一端 | DSH 应用商店安装（或插件管理界面「添加插件」）后启用 |
-| **全局 CLI** | `codex-dsh-dispatch` 命令，用来打开菜单、登记 Codex、写协作提示词 | 单独做一次 `npm install -g` |
+| **DSH 插件** | 在 DSH 进程里提供 `/mcp/codex-dsh-dispatch` 服务，并带一页图形设置 | DSH 应用商店安装（或插件管理界面「添加插件」）后启用 |
+| 全局 CLI（可选） | `codex-dsh-dispatch` 命令，给习惯终端的人用 | 需要时再 `npm install -g` |
 
-**商店/插件安装不会把 `codex-dsh-dispatch` 命令注入 PATH**，也不会自动改 Codex 配置或 AGENTS.md。想在任意目录直接敲这个命令，必须另外装一次全局 CLI。
+**商店/插件安装不会把 `codex-dsh-dispatch` 命令注入 PATH**，也不会自动改 Codex 配置或 AGENTS.md。图形设置页同样不装全局命令——它直接用插件自己的安装路径登记。
 
 ### 1. DSH 插件
 
 在 DSH 插件管理界面选择「添加插件」，输入包名 `codex-dsh-dispatch`，安装后启用。商店收录后也可以直接从商店安装；源码开发时填写已构建的本地目录。桌面版的 desktop Profile 由应用自己管理，不手工改写。
 
-### 2. 全局 CLI
+### 2. 在设置里接上 Codex
+
+打开 DSH **设置 → Codex 派单**：
+
+1. **Codex 接入** 一节显示 Codex 配置文件路径、MCP 入口、以及要用的 Node。点「连接到 Codex」，插件会调用 Codex 官方 CLI 写入一条名为 `codex-dsh-dispatch` 的 stdio MCP，指向本插件的 `bin/codex-dsh-dispatch.mjs`。写入前会重新读一次同名条目，已有就拒绝覆盖；条目被停用时也会明确提示。这一行是一击执行，不再弹二次确认。
+2. **协作规则** 一节只写全局 `AGENTS.md`（`CODEX_HOME` 或 `~/.codex`），只动自己那一对托管标记之间的内容。项目级 `AGENTS.md` 仍由 CLI 向导的显式选择处理。
+3. **默认模型 / 思考强度 / 默认权限 / 无项目默认工作区** 改完点「保存」。默认工作区从 DSH 已登记的工作区里选，保存的是工作区 ID，可以用「未设置」清空。
+
+**只有修改 Node 路径需要二次确认。** 未指定时，输入框显示从 PATH 找到的 Node；清空手动路径并保存即可恢复自动查找。这个设置影响下一次 MCP 登记，不会改写已有登记。
+
+桌面版 DSH 跑在 Electron 里，它自己的可执行文件不能当 Node 用。设置页会显示实际解析到的 Node 与版本；解析不出来时，在「Node 路径」里填一个 node 可执行文件的绝对路径再保存。**不需要**为了这一步装全局 CLI。
+
+### 可选：全局 CLI
 
 ```cmd
 npm install -g codex-dsh-dispatch
 ```
 
-需要 Node.js 22.19 以上的 22.x，或 24.9 及以上；登记 MCP 还需要 Codex 官方 CLI。装完在任意目录都能敲 `codex-dsh-dispatch`。
+需要 Node.js 22.19 以上的 22.x，或 24.9 及以上；登记 MCP 还需要 Codex 官方 CLI。装完在任意目录都能敲 `codex-dsh-dispatch`。CLI 与图形设置页调的是同一组逻辑，两者改的是同一份配置。
 
 也可以从本项目的 GitHub Release tgz 安装。CLI 和 DSH 插件需分别更新到相同版本。
 
@@ -44,9 +58,9 @@ npm install
 npm link --ignore-scripts
 ```
 
-`npm install` 的 `prepare` 会编译到 `lib/`；`npm link` 注册全局命令。已有源码目录只需重新安装、构建和链接，不必重新克隆。
+`npm install` 的 `prepare` 会编译到 `lib/`（含客户端 `lib/client.js`）；`npm link` 注册全局命令。已有源码目录只需重新安装、构建和链接，不必重新克隆。
 
-## 第一次接入：打开菜单
+## CMD 用法（可选）
 
 ```cmd
 codex-dsh-dispatch
@@ -99,7 +113,7 @@ codex-dsh-dispatch config
 
 | 工具 | 用途 |
 | --- | --- |
-| `dsh_start` | 复用或注册工作区，创建专属 DSH 对话并提交任务 |
+| `dsh_start` | 按 cwd 复用/注册工作区（或省略 cwd 用保存的默认工作区），创建专属 DSH 对话并提交任务 |
 | `dsh_wait` | 按请求 ID 和游标等待结果或人工输入 |
 | `dsh_send` | 在原对话中补充任务（`mode: 'queue'` / `'steer'`）或回答受支持的提问 |
 | `dsh_cancel` | 显式请求取消，不把接收确认当成已取消 |
@@ -113,9 +127,13 @@ codex-dsh-dispatch config
 
 同目录共享 DSH 工作区，不同 Codex 对话使用各自的 DSH 会话。本插件只串行协调自己的同目录任务，不锁用户或其他程序的文件操作。
 
+`dsh_start` 的 `cwd` 可以省略：**只要有具体项目目录就一律传它的绝对路径**；确认这次没有对应项目时才可以不传，不传时用设置页里选定的「无项目默认工作区」。显式传了的必须是绝对路径——传错不会回退到默认值，而是直接报错。默认工作区被删掉时不会自动重建，也不替你改选，只提示回设置页重新选择或直接传 cwd。`dsh_send` / `dsh_wait` / `dsh_cancel` 不受影响。
+
+默认模型、强度、权限和工作区只影响新建会话。升级后，在「全局 AGENTS.md」一行点「更新」以替换旧协作规则，再重载 Codex，让它读取新规则和 MCP 工具参数。
+
 ## 协作提示词是干什么的
 
-菜单里的「写入协作提示词」把一段 `## Codex 与 DSH 协作` 写进 `AGENTS.md`，让 Codex 知道这套分工：Codex 规划/审查/纠错/交付，DSH 实现；派单用稳定的 `requestId` 且只派一次，`dsh_wait` 超时后继续等或补充说明而不是重复派单；派单时带上绝对工作目录、完整需求、允许改的范围与验收条件；跑的过程中要纠偏就用 `dsh_send` 的 `steer`，DSH 停止写入后的返工用 `queue`；**小范围 bug 由 Codex 直接修，较大返工才回原会话**；模型与强度默认走桥接设置；委派本身不扩大权限，测试、装依赖、提交仍然要用户当次授权。
+在 DSH 设置的「全局 AGENTS.md」一行点「写入」，Codex 就会在之后读取的规则里看到这套分工：**简单和特别难的任务由 Codex 直接做；方向明确、范围可控的中等实现才优先派给 DSH。** Codex 审查实际改动，小问题直接修，达到验收条件就交付。
 
 托管范围只有这一对标记之间：
 
@@ -125,11 +143,11 @@ codex-dsh-dispatch config
 <!-- codex-dsh-dispatch end -->
 ```
 
-区块外的内容（包括你自己写的同名小节）原样保留。标记不成对、或确认期间文件被改动时会报错，不覆盖文件。同目录若存在非空 `AGENTS.override.md`，它的优先级更高，菜单会提醒写入的规则可能不生效。
+区块外的内容（包括你自己写的同名小节）原样保留。标记不成对，或文件自上次读取后被改动时，本次不写入。同目录若存在非空 `AGENTS.override.md`，它的优先级更高，设置页会提醒。
 
 ## 工作流程
 
-1. Codex 判断方向，把任务通过 `dsh_start` 派给 DSH（绝对工作目录 + 任务 + 稳定 `requestId`）。
+1. Codex 判断方向及是否值得派单。适合委派时，用 `dsh_start` 提交任务、工作目录（只有无项目时省略）和稳定的 `requestId`。
 2. DSH 在自己的会话里实现。
 3. Codex 用 `dsh_wait` 等结果，超时继续用同一个 `requestId` 等，不重复派单。
 4. 发现方向偏了、约束漏了，用 `dsh_send` 的 `steer` 趁它还在跑直接纠偏；等它停下来才要改的，用 `queue`。
@@ -159,7 +177,7 @@ codex-dsh-dispatch config
 
 ## 卸载
 
-顺序是**先用菜单清掉它写过的配置，再拆命令和插件**——命令没了就进不去菜单了。
+先在 DSH 的「Codex 派单」设置页或 CMD 菜单中移除协作规则与 MCP 登记，再卸载插件；安装过全局 CLI 时再卸载命令。
 
 1. 菜单里「移除 AGENTS.md 里的协作提示词」（全局和当前目录各查一次，只删托管区块）。
 2. 移除 MCP 登记并解除命令：

@@ -4,6 +4,7 @@
  * 注意：本层只允许类型声明（依赖规则 D3）。
  */
 
+import type { CodexConfigPort } from './codex-port.js'
 import type { InteractionPort } from './interaction-port.js'
 import type { ModelPort } from './model-port.js'
 import type { PermissionPort } from './permission-port.js'
@@ -41,7 +42,9 @@ export type {
   EnsureWorkspaceInput,
   EnsureWorkspaceResult,
   WorkspacePort,
+  WorkspaceSummary,
 } from './workspace-port.js'
+export type { CodexConfigPort } from './codex-port.js'
 export type {
   AnswerInput,
   AnswerResult,
@@ -64,4 +67,5 @@ export interface Ports {
   readonly model: ModelPort
   readonly registry: SessionRegistryPort
   readonly settings: SettingsPort
+  readonly codex: CodexConfigPort
 }

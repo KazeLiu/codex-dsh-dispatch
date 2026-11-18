@@ -2,7 +2,7 @@ import { confirm, select } from '@inquirer/prompts'
 import { readFile } from 'node:fs/promises'
 import { basename } from 'node:path'
 import { readConnection } from '../connection.js'
-import { CodexCliError } from './codex-cli.js'
+import { CodexCliError } from '../codex/codex-cli.js'
 import {
   AgentsFileError,
   blockPresent,
@@ -16,21 +16,22 @@ import {
   writeAgentsFile,
   type AgentsScope,
   type AgentsTarget,
-} from './agents-file.js'
+} from '../codex/agents-file.js'
 import { fetchSettings, readClientConfig, SettingsClientError } from './client.js'
-import { COLLABORATION_PROMPT } from './collaboration-prompt.js'
+import { COLLABORATION_PROMPT } from '../codex/collaboration-prompt.js'
 import { printModels, runConfigTui } from './main.js'
+import { resolveNodeRuntime } from '../codex/node-runtime.js'
 import {
   DISABLED_HINT,
   SERVER_NAME,
   describeCurrent,
   inspectRegistration,
   isDisabled,
-  planRegistration,
   register,
+  resolveBinPath,
   unregister,
   type RegistrationState,
-} from './mcp-registration.js'
+} from '../codex/mcp-registration.js'
 
 /**
  * 首次接入向导。
@@ -97,11 +98,11 @@ async function describeAgents(scope: AgentsScope): Promise<string> {
 
 /** 只读状态汇总：不写任何文件，不要求 DSH 在线。 */
 export async function printStatus(): Promise<number> {
-  const plan = planRegistration()
+  const node = await resolveNodeRuntime()
   console.log('Codex DSH Dispatch · 状态')
   console.log(`  版本：${await readVersion()}`)
-  console.log(`  当前 Node：${plan.node}`)
-  console.log(`  bin 入口：${plan.bin}`)
+  console.log(`  当前 Node：${node.ok ? `${node.runtime.path}（${node.runtime.version ?? '版本未知'}）` : `不可用：${node.message}`}`)
+  console.log(`  bin 入口：${resolveBinPath()}`)
   console.log(`  Codex MCP：${await describeRegistration()}`)
   console.log(`  AGENTS.md（全局）：${await describeAgents('global')}`)
   console.log(`  AGENTS.md（当前目录）：${await describeAgents('project')}`)

@@ -28,10 +28,11 @@ import {
   requestFingerprint,
   submitSerial,
 } from './deps.js'
-import { readSavedModel, readSavedPermission } from './settings.js'
+import { readSavedModel, readSavedPermission, readSavedWorkspaceId } from './settings.js'
 
 /** `dsh_start` 入参（已从 MCP 参数解析）。 */
 export interface StartTaskInput {
+  /** 可省略：省略时用设置里保存的「无项目默认工作区」。 */
   readonly cwd: unknown
   readonly task: unknown
   readonly requestId: unknown
@@ -57,21 +58,26 @@ export async function startTask(deps: AppDeps, input: StartTaskInput): Promise<S
 }
 
 async function executeStartTask(deps: AppDeps, input: StartTaskInput): Promise<StartTaskOutput> {
-  const cwd = requireNonEmpty(input.cwd, 'cwd')
   const task = requireNonEmpty(input.task, 'task')
   const requestId = requireNonEmpty(input.requestId, 'requestId')
   const sourcePermission = readSourcePermission(input.sourcePermission)
   const requestedModel = readRequestedModel(input.model)
+  const explicitCwd = readExplicitCwd(input.cwd)
+  const explicitWorkspace = explicitCwd === null
+    ? null
+    : await deps.ports.workspace.ensureWorkspace({ cwd: explicitCwd })
 
-  if (!isAbsolutePath(cwd)) {
-    throw bridgeError('invalid-argument', `cwd 必须是绝对路径：${cwd}`, { cwd })
-  }
-
-  const workspace = await deps.ports.workspace.ensureWorkspace({ cwd })
-  const fingerprint = requestFingerprint({ cwd: workspace.canonicalCwd, task, sourcePermission, requestedModel })
+  // 省略 cwd 的重试沿用首次登记的目录，不重新读默认工作区。
+  // 显式传入的目录仍参与冲突检测，不能把不同项目的请求当成同一次。
   for (const existing of await deps.ports.registry.list()) {
     const request = existing.requests?.[requestId]
     if (request?.kind !== 'start') continue
+    const fingerprint = requestFingerprint({
+      cwd: explicitWorkspace?.canonicalCwd ?? existing.canonicalCwd,
+      task,
+      sourcePermission,
+      requestedModel,
+    })
     if (request.fingerprint !== fingerprint) throw bridgeError('invalid-argument', '同一 requestId 已用于不同的创建参数', { requestId })
     await assertNotBusy(deps, existing.canonicalCwd, existing.sessionId)
     if (request.phase === 'prepared') {
@@ -81,6 +87,9 @@ async function executeStartTask(deps: AppDeps, input: StartTaskInput): Promise<S
     const { resolved } = await observeTask(deps, forRequest(existing, requestId), null)
     return { workspaceId: existing.workspaceId, sessionId: existing.sessionId, cwd: existing.canonicalCwd, requestId, status: resolved.status, ...await currentViews(deps, existing.sessionId) }
   }
+
+  const workspace = explicitWorkspace ?? await resolveDefaultWorkspace(deps)
+  const fingerprint = requestFingerprint({ cwd: workspace.canonicalCwd, task, sourcePermission, requestedModel })
   await assertNotBusy(deps, workspace.canonicalCwd, null)
 
   // 配置解析：全部在建会话之前完成，失败不留空会话。
@@ -187,6 +196,48 @@ async function executeStartTask(deps: AppDeps, input: StartTaskInput): Promise<S
   deps.observed.set(observedKey(sessionId, requestId), 'accepted')
 
   return { ...started, status: 'accepted' }
+}
+
+async function resolveDefaultWorkspace(deps: AppDeps): Promise<{
+  readonly workspaceId: string
+  readonly canonicalCwd: string
+}> {
+  const savedId = await readSavedWorkspaceId(deps)
+  if (savedId === null) {
+    throw bridgeError(
+      'invalid-argument',
+      'dsh_start 省略了 cwd，但设置里还没有选『无项目默认工作区』。' +
+        '请在 DSH 设置 → Codex 派单 → 无项目默认工作区里选一个，或直接传 cwd。',
+      { field: 'cwd' },
+    )
+  }
+  // 用 ID 回查宿主当前事实：工作区可能已被删、被改名、路径被改。
+  // 查不到就明确报错，绝不按保存时的路径去 `ensureWorkspace` 重建一个。
+  const resolved = await deps.ports.workspace.resolveWorkspace(savedId)
+  if (resolved === null) {
+    throw bridgeError(
+      'invalid-argument',
+      `设置里保存的默认工作区 ${savedId} 已不在当前 DSH 里。` +
+        '请到 DSH 设置 → Codex 派单 重新选择，或直接传 cwd。',
+      { field: 'cwd', workspaceId: savedId },
+    )
+  }
+  return { workspaceId: resolved.workspaceId, canonicalCwd: resolved.canonicalCwd }
+}
+
+/**
+ * 读显式 cwd。
+ *
+ * 只有 `undefined` 表示没传，走默认工作区；一旦传了就必须是绝对路径，
+ * 空串与相对路径照旧报错——「显式传错了」不能悄悄降级成「用了默认值」。
+ */
+function readExplicitCwd(value: unknown): string | null {
+  if (value === undefined) return null
+  const cwd = requireNonEmpty(value, 'cwd')
+  if (!isAbsolutePath(cwd)) {
+    throw bridgeError('invalid-argument', `cwd 必须是绝对路径：${cwd}`, { cwd })
+  }
+  return cwd
 }
 
 /** 把模型解析失败原因映射到对外错误码。 */

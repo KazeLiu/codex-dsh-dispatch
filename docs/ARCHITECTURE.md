@@ -39,13 +39,20 @@
 |---|---|---|---|
 | 组装根 | `src/index.ts` | 读配置、构造适配器、注册路由与工具、返回清理函数 | 全部 |
 | 宿主适配 | `src/host/` | 把 DSH 服务包成端口实现；唯一 `import '@deepseek-ai/*'` 处 | `ports/`、`domain/` 的类型 |
-| 传输 | `src/transport/` | 路由注册、回环与认证围栏、JSON-RPC 帧、SSE 生命周期 | `mcp/` |
-| 协议 | `src/mcp/` | 工具定义与参数校验、`tools/list`/`tools/call` 分派、结果与错误投影 | `app/`、`domain/` |
-| 应用 | `src/app/` | 四个用例：start / wait / send / cancel | `domain/`、`ports/` |
-| 领域 | `src/domain/` | 状态机、回合归属、权限映射、模型三层解析、串行占用判定 | 无（纯 TS） |
+| 传输 | `src/transport/` | 路由注册、回环与认证围栏、JSON-RPC 帧、SSE 生命周期 | `mcp/`、`domain/`、`ports/` |
+| 协议 | `src/mcp/` | 工具定义与参数校验、`tools/list`/`tools/call` 分派、结果与错误投影 | `app/`、`domain/`、`ports/` |
+| 应用 | `src/app/` | 用例：start / wait / send / cancel / 设置读写 / Codex 接入 | `domain/`、`ports/`、`codex/` |
+| 领域 | `src/domain/` | 状态机、回合归属、权限映射、模型三层解析、串行占用判定、设置与接入的纯形状 | 无（纯 TS） |
 | 端口 | `src/ports/` | 宿主能力的接口声明 | 无 |
+| Codex 本机操作 | `src/codex/` | 调官方 `codex` CLI、解析可用 Node、读写 AGENTS.md 托管区块 | 无（只用 Node 内置） |
+| 浏览器客户端 | `src/client/` | 设置页的 React 片段，经 DSH 网页服务同源调用后端 | `domain/` 的类型 |
 
 **为什么是这五层而不是更多**：每一层都对应一个真实的可替换缝——宿主 API 会随 DSH 版本漂移（隔离在 `host/`）、传输协议将来可能要加 stdio（隔离在 `transport/`）、JSON-RPC 帧与工具语义是两件事（隔离在 `mcp/`）、状态机是最容易出错且最需要脱离 DSH 单测的部分（隔离在 `domain/`）。再往下拆（如独立 `service/`、`repository/`）在第 1 阶段没有第二个实现，属于过早抽象。
+
+`src/codex/` 与 `src/client/` 是第 ⑤ 步新增的两个独立边：
+
+- `codex/` 放「怎么在本机跑 Codex」——定位 CLI、解析可用 Node、读写 AGENTS.md。它不依赖任何其它层（含 `domain/`），因为 CLI 与设置页都要用它，而它本身只碰 Node 内置能力与用户自己的文件；`app/` 与 `tui/` 都允许依赖它。
+- `client/` 是**浏览器端**代码，编译目标与后端完全不同（DOM lib、无 `node:*`、无 ESM）。它只允许依赖 `domain/` 的**类型**，且必须是 `import type`（类型查询在转译时被擦除，产物里不会出现 `require`）。
 
 ## 2. 目录清单
 
@@ -62,6 +69,8 @@ src/
     model-adapter.ts          # ModelPort 实现（第 1 阶段即需：提交首条任务前要应用模型）
     registry-adapter.ts       # SessionRegistryPort 实现（$DSH_HOME 下的最小归属表）
     settings-adapter.ts       # SettingsPort 实现（$DSH_HOME/codex-dsh-dispatch/settings.json）
+    codex-config-adapter.ts   # CodexConfigPort 实现（$DSH_HOME/codex-dsh-dispatch/codex.json，只存手填的 Node 路径）
+    web-route.ts              # 把 REST 面挂到宿主 webServer（晚就绪时用 ctx.on('internal/service') 重试一次）
   ports/
     workspace-port.ts
     session-port.ts
@@ -70,11 +79,14 @@ src/
     model-port.ts
     registry-port.ts          # 会话归属登记（$DSH_HOME/codex-dsh-dispatch/state.json）
     settings-port.ts          # 桥接默认值持久化（$DSH_HOME/codex-dsh-dispatch/settings.json）
+    codex-port.ts             # Codex 接入配置持久化（codex.json）
     index.ts                  # 端口聚合类型，供装配根引用
   domain/
     types.ts                  # 六态、视图、快照、输出记录等纯类型
     errors.ts                 # BridgeError 与 12 个固定错误码
     settings.ts               # 设置快照/更新形状 + 持久化模型 + 纯解析函数
+    codex-integration.ts      # 设置页「Codex 接入」的只读快照形状（读不到用 null + error 表达）
+    codex-config.ts           # codex.json 的形状与解析
     status.ts                 # TaskStatus 六态与迁移合法性
     turn-attribution.ts       # 请求 ↔ 回合归属判定
     status-resolver.ts        # 原生事实 → 六态
@@ -84,6 +96,22 @@ src/
     model-choice.ts           # 三层模型解析
     projection/
       output.ts               # 会话事件 → 可读增量文本
+  codex/
+    path-scan.ts              # 按 PATH 找可执行文件（找 codex 与找 node 共用）
+    node-runtime.ts           # 解析可用系统 Node；绝不把 Electron 宿主自身当 Node
+    codex-cli.ts              # 定位并调用官方 codex CLI（execFile，不经 shell）
+    mcp-registration.ts       # 登记/移除本插件的 Codex MCP 条目（node 由调用方注入）
+    codex-home.ts             # CODEX_HOME 解析与 config.toml 展示路径
+    agents-file.ts            # AGENTS.md 托管区块的幂等读写
+    collaboration-prompt.ts   # 协作提示词正文（托管区块内容）
+  client/
+    globals.d.ts              # declare const React + domain 类型别名（全部 import type）
+    logic/api.ts              # 同源 fetch 封装与错误归一化
+    logic/store.ts            # 模块级草稿 store（useSyncExternalStore 订阅，重挂载不丢草稿）
+    logic/ui.ts               # 样式常量与最小控件工厂（复用 --dsw-alias-* 令牌）
+    logic/section.ts          # 设置页主体
+    logic/register.ts         # 注册 settings.section 槽位
+    logic/apply.ts            # 客户端入口
   app/
     deps.ts                   # 用例层依赖聚合（ports + observed 观察缓存 + started 回执）
     start-task.ts
@@ -91,6 +119,7 @@ src/
     send-task.ts              # text 走 prompt；reply 走原生 answer（基线不同，见 6.2）
     cancel-task.ts
     settings.ts               # 读/写设置快照（含失效判定）
+    codex-integration.ts      # Codex 接入用例：读现场、写登记、写协作规则
   mcp/
     dispatcher.ts             # JSON-RPC 方法分派（initialize/tools/list/tools/call/...）
     errors.ts                 # 桥接错误码 ↔ JSON-RPC / CallToolResult
@@ -103,20 +132,22 @@ src/
   transport/
     route.ts                  # WebRoute 本地结构化声明 + 两条路由路径常量（不 import 宿主包）
     auth.ts                   # 回环判定 + 客户端凭据校验
+    trusted.ts                # 网页设置通道的请求来源判定（Host 回环 / Sec-Fetch-Site / Origin）
     http.ts                   # POST 处理、SSE 长挂、请求体上限
     settings-route.ts         # GET/PUT /mcp/settings（REST，复用 auth 围栏，见 5.8）
+    integration-route.ts      # /codex-dsh-dispatch/api（设置页用的 REST 面，走 trusted 围栏）
   tui/
     state.ts                  # 纯状态机（草稿、失效标记、脏判定）
     render.ts                 # 纯字符串渲染（CJK 双宽对齐，无第三方依赖）
     client.ts                 # 本机认证通道的 HTTP 客户端（凭据只从环境读）
     main.ts                   # 行命令主循环（跨 Windows shell 一致）
     setup.ts                  # 接入向导主菜单（DSH 不在线也能用）
-    codex-cli.ts              # 定位并调用官方 codex CLI（execFile，不经 shell）
-    mcp-registration.ts       # 登记/移除本插件的 Codex MCP 条目
-    agents-file.ts            # AGENTS.md 托管区块的幂等读写
-    collaboration-prompt.ts   # 协作提示词正文（托管区块内容）
 bin/
   codex-dsh-dispatch.mjs        # CLI 入口（零依赖、零构建，动态 import lib/tui/main.js）
+scripts/
+  check-boundaries.mjs          # D1–D8 静态扫描
+  build-client.mjs              # 把 src/client 片段拼成 lib/client.js（ts.transpileModule）
+tsconfig.client.json            # 浏览器片段的独立编译配置（DOM lib、module None、noEmit）
 locale/
   en.json                     # 插件元数据（meta.title / meta.description），宿主插件列表显示用
   zh.json                     # 同上，简体中文
@@ -127,9 +158,11 @@ package.json
 
 第 1 阶段**不建**：`src/config/`、`src/cli/`。第 ④ 步的落地形态与原计划不同：设置持久化走 `src/domain/settings.ts` + `src/ports/settings-port.ts` + `src/host/settings-adapter.ts`（写 `$DSH_HOME/codex-dsh-dispatch/settings.json`，与归属表 `state.json` 分开），TUI 放 `src/tui/` 而非 `src/cli/`。`locale/` 与 `icon.svg` 已在第 ④ 步建好，`package.json` 的 `files` 已同步补全（C6 关闭）。
 
-`src/tui/` 与 `bin/` 是**进程外的配置客户端**，不在插件运行期依赖链上：`src/tui/**` 只允许 import `src/domain/**`（`ALLOWED_TARGETS` 的 `tui → {domain}`），`bin/` 是纯 JS 启动脚本，不参与 `tsc`。
+`src/tui/` 与 `bin/` 是**进程外的配置客户端**，不在插件运行期依赖链上：`src/tui/**` 只允许 import `src/domain/**` 与 `src/codex/**`（`ALLOWED_TARGETS` 的 `tui → {domain, codex}`），`bin/` 是纯 JS 启动脚本，不参与 `tsc`。
 
-接入向导（`setup.ts`）与它用到的四个模块同样在 `src/tui/` 内，只依赖 Node 内置能力与 `@inquirer/prompts`：它们读写的是**用户自己的** Codex 配置与 AGENTS.md，不碰 DSH profile、不碰插件运行期状态，因此不需要新增层级，也不改变 `ALLOWED_TARGETS`。插件加载与 `npm install` 都不会调用这些模块——只有用户显式执行命令并确认后才写盘。
+接入向导（`setup.ts`）与它用到的 `src/codex/` 模块只依赖 Node 内置能力与 `@inquirer/prompts`：它们读写的是**用户自己的** Codex 配置与 AGENTS.md，不碰 DSH profile、不碰插件运行期状态。插件加载与 `npm install` 都不会调用这些模块——只有用户显式执行命令或在设置页点过确认后才写盘。
+
+`src/client/` 不参与后端 `tsc`（`tsconfig.json` 的 `exclude` 里有它），由 `tsconfig.client.json` 单独检查、由 `scripts/build-client.mjs` 拼成单文件 `lib/client.js`。它**不是**一个独立网页：产物是 `window.__ModuleLoader__.load({ id, factory })` 形式的客户端模块，由宿主在渲染进程里加载并注入 `React`。
 
 ## 3. 依赖规则（可机械校验）
 
@@ -141,9 +174,10 @@ package.json
 | D4 | `src/mcp/**` 不得 import `src/host/**` | 协议面与宿主耦合 |
 | D5 | `src/transport/**` 不得 import `src/host/**`、`src/app/**` | 传输层越权拿到用例 |
 | D6 | 任何层不得 `import '@modelcontextprotocol/sdk/*'` | 本机无该包，运行时直接崩 |
-| D7 | `src/` 内不得用相对路径**横向跳到兄弟层**。允许的跨层方向只有第 1 节表格声明的向内依赖：`host → {domain, ports}`、`transport → {mcp, domain, ports}`、`mcp → {app, domain, ports}`、`app → {domain, ports}`、`ports → {domain}`、`tui → {domain}`；同层内（含子目录回父目录，如 `domain/projection/x.ts → ../types`）合法 | 依赖方向倒置 |
+| D7 | `src/` 内不得用相对路径**横向跳到兄弟层**。允许的跨层方向只有第 1 节表格声明的向内依赖：`host → {domain, ports}`、`transport → {mcp, domain, ports}`、`mcp → {app, domain, ports}`、`app → {domain, ports, codex}`、`ports → {domain}`、`tui → {domain, codex}`、`client → {domain}`、`codex → {}`；同层内（含子目录回父目录，如 `domain/projection/x.ts → ../types`）合法 | 依赖方向倒置 |
+| D8 | `src/client/**` 不得 import `node:*` 或 `@deepseek-ai/*` | 浏览器端拿不到这些模块，产物一加载就抛错 |
 
-CI 前置检查：`scripts/check-boundaries.mjs` 已实现 D1–D7 的静态扫描（D3 单独检查 ports 层无运行时代码）。
+CI 前置检查：`scripts/check-boundaries.mjs` 已实现 D1–D8 的静态扫描（D3 单独检查 ports 层无运行时代码）。
 
 ```bash
 node scripts/check-boundaries.mjs     # 通过 exit 0，违规 exit 1 并逐条打印 文件:行号
@@ -315,7 +349,7 @@ export interface SessionRegistryPort {
 ```jsonc
 // input
 {
-  "cwd": "/abs/path",              // 必填，绝对路径
+  "cwd": "/abs/path",              // 项目的实际绝对路径；无项目时可省略，使用保存的默认工作区
   "task": "……",                    // 必填，完整任务文字
   "requestId": "……",               // 必填，调用方稳定 ID
   "sourcePermission": "ask",       // 可选：ask | auto | full
@@ -442,7 +476,7 @@ export interface SessionRegistryPort {
 - 两条读取路径互相独立、失败互不传染：`pendingInput` 走 `sessionController.state()`，提问详情走 `sessionProjections.stateOf(session, 'userQuestions')`。任一路读不到都只降级，不让 `dsh_wait` 整体失败。
 - `dsh_start` / `dsh_send` 的返回体**平铺** `model` 与 `permission`，不套 `config` 包裹层；`permission` 用 `level` 而非 `value`（理由见 5.1）。
 - `dsh_send` 的返回体**必须含 `cursor`**（提交后读到的新游标），否则客户端无法直接接着 `dsh_wait`；不含 `workspaceId`/`cwd`（`dsh_start` 已给过，会话不变它们就不变）。`model` 是**提交后从宿主回读的实际生效值**，与 `dsh_start` 一样平铺返回——它不接受模型参数，回读只为让客户端知道这次跑在哪个模型上。文字提交还会回显本次实际使用的 `mode`，`reply` 不带该字段。
-- **`-32602` 与 `isError` 的界线**：工具**根本没跑起来**（缺 `name`、未知工具名、`arguments` 非对象、缺 `cwd`、`cwd` 非绝对路径、`requestId` 为空、`model` 只给一半）→ JSON-RPC `-32602 INVALID_PARAMS`；工具**跑起来但业务失败**（`workspace-busy`/`session-not-found`/`turn-missing`/`wait-timeout`/`host-capability-missing`/`internal`）→ HTTP 200 + `result.isError = true`。`-32600 INVALID_REQUEST` 只用于「这压根不是合法 JSON-RPC 请求」（非对象、`jsonrpc` 不是 `"2.0"`、`method` 非字符串）。
+- **`-32602` 与 `isError` 的界线**：工具**根本没跑起来**（缺 `name`、未知工具名、`arguments` 非对象、显式 `cwd` 非绝对路径、无项目且无有效默认工作区、`requestId` 为空、`model` 只给一半）→ JSON-RPC `-32602 INVALID_PARAMS`；工具**跑起来但业务失败**（`workspace-busy`/`session-not-found`/`turn-missing`/`wait-timeout`/`host-capability-missing`/`internal`）→ HTTP 200 + `result.isError = true`。`-32600 INVALID_REQUEST` 只用于「这压根不是合法 JSON-RPC 请求」（非对象、`jsonrpc` 不是 `"2.0"`、`method` 非字符串）。
 - **`model-unavailable` / `reasoning-effort-unavailable` / `saved-model-invalid` / `permission-unavailable` 四个码走 `-32602`**：它们虽然发生在工具执行期，但对客户端而言都是「你的参数与当前环境不匹配，换参数才能继续」，与「任务执行失败」不是同一类。
 - **`text` 与 `reply` 严格互斥**：两者都传或都不传 → `invalid-argument`。`reply` 必须走原生 `userQuestions.answer`，**不得降级成普通 prompt**——降级会让客户端以为回答已送达，而模型仍在等一个不会来的答案。`reply` 被拒时 `detail.reason` ∈ `not-pending` / `already-queued` / `bad-answer` / `caller-not-live`。
 - **`mode` 只配合 `text`**：`mode` ∈ `queue`（缺省）/ `steer`，直接透传宿主 `prompt` 的原生 `mode`，桥接层不重启、不先取消再重发。`reply` 走提问回答通道，同时给 `mode` → `invalid-argument`。`mode` 参与 `requestId` 冲突校验：同一 `requestId` 换了 `mode` 属于不同提交，按冲突拒绝；不写与写 `queue` 完全等价。
@@ -546,9 +580,9 @@ TUI 与其它本机配置客户端走这条**独立于 MCP 端点**的 REST 路�
 
 **写入校验有两道，且都必要**：传输层把 body 原样交给用例层，用例层的 `writeSettings` 内部再调一次 `readSettingsUpdate` 做形状校验，然后校验「模型在目录里 / 强度属于该模型 / 权限预设可用」。传输层**不做预校验**——重复实现会让两处规则漂移。**目录读不到时用例层跳过第二类校验**（否则 DSH 还没起来时用户连保存都做不到），这是有意的不对称：形状永远严格，环境相关的一致性只在读得到时检查。
 
-### 5.9 宿主 Browser access 围栏（部署前置，非本插件可控）
+### 5.9 宿主网页围栏与独立 MCP 通道
 
-**这是本插件之外、但决定它能否被外部客户端访问的硬约束，必须在部署文档里写明。**
+宿主网页围栏作用于 `webServer` 注册的路由。Codex 与 CMD 客户端使用插件自己的回环监听，不经过这层围栏，不需要开启「允许浏览器访问」。原生设置页则使用宿主网页路由，遵守宿主的访问策略。
 
 `DSH Desktop` 的 `NextWebServer`（`app.asar/lib/webserver.js`）覆写了 `register`/`registerUpgrade`，给**每一条**注册的路由套上 `policy(route)`：
 
@@ -575,14 +609,39 @@ function decideDesktopBrowserAccess(access, request) {
 
 - `renderer` 需要请求头 `x-dsh-desktop-renderer: <每次启动随机生成的 32 字节 base64url>`，该 token 只注入 Electron 渲染进程的原生网络会话，**外部进程拿不到、也不该去拿**。
 - `ordinaryBrowserEnabled` 来自桌面端偏好 `browserAccess`，默认值 `false`（`app.asar/lib/desktop-contract-YEiRp6ni.js` 的 `DEFAULT_PREFERENCES`）。
-- 因此**默认配置下，任何不带渲染进程头的 HTTP 请求（包括 Codex 的 MCP 请求）在到达插件之前就被 403 掉**，响应体是纯文本 `Browser access is disabled`。
+- 因此默认配置下，外部进程请求宿主网页端口会得到 `403 Browser access is disabled`。这不能用来判断插件独立 MCP 端点是否可用。
 
 **结论与处置**：
 
-1. 这是**部署前置条件**，不是本插件的 bug：用户必须在 DSH 桌面端设置里打开「允许浏览器访问」（`browserAccess`），桥接路由才可达。第 ⑤ 步联调前必须先确认该开关状态。
-2. 本插件**不得**尝试绕过：不伪造 `x-dsh-desktop-renderer`、不改宿主偏好文件、不另起 HTTP 服务。绕过去等于把桌面端的安全边界拆掉。
-3. 错误必须**可诊断**：`src/transport/auth.ts` 的围栏在宿主围栏之后才执行，所以客户端看到的是宿主的 403 纯文本而不是本插件的中文文案。`src/tui/client.ts` 的 `describeFailure` 已专门识别 `Browser access is disabled` 并给出「请在 DSH 设置里打开『允许浏览器访问』」的指引——**不要把这条 403 显示成「只接受本机回环连接」**，那会让用户去查回环配置。
-4. 该围栏同时作用于 `registerUpgrade`，所以第 2 阶段若改用 WebSocket 传输，同样受此约束，不会因为换协议而豁免。
+1. MCP 代理从专用连接文件发现插件地址，不连接宿主网页端口；若出现上述错误，先检查是否设置了旧地址覆盖。
+2. 原生设置页由 DSH 渲染进程发同源请求。本插件不伪造 `x-dsh-desktop-renderer`，不读取渲染进程凭据，不改宿主偏好文件。
+3. 独立回环监听校验 Bearer 凭据；设置页路由另行校验 Host、Origin 与 Fetch Metadata，不把配置管理动作注册为 MCP 工具。
+
+设置页仍需实际加载确认：若原生页面返回 403，应区分宿主拒绝与本插件的来源校验错误，再检查实际请求来源，不要求用户为此开放普通浏览器访问。
+
+### 5.10 设置页通道（`/codex-dsh-dispatch/api`）
+
+设置页与插件后端之间走 DSH 自己的网页服务，不经过上面那个独立回环端口：
+
+| 方法 | 路径 | 语义 |
+|---|---|---|
+| `GET` | `/codex-dsh-dispatch/api/settings` | 读设置快照（与 `/mcp/settings` 同一份用例） |
+| `PUT` | `/codex-dsh-dispatch/api/settings` | 写默认模型与默认权限 |
+| `GET` | `/codex-dsh-dispatch/api/integration` | 读 Codex 接入快照（配置路径 / Node / 同名 MCP / AGENTS 状态 / 工作区列表） |
+| `PUT` | `/codex-dsh-dispatch/api/config` | 存手填的 Node 可执行文件路径 |
+| `POST` | `/codex-dsh-dispatch/api/register` | 写 Codex 的 MCP 登记 |
+| `POST` | `/codex-dsh-dispatch/api/unregister` | 移除本插件的 MCP 登记 |
+| `POST` | `/codex-dsh-dispatch/api/agents` | 写或移除 AGENTS.md 托管区块 |
+
+**围栏不是 Bearer，而是请求来源**：`src/transport/trusted.ts` 的 `isTrustedApiRequest` 依次判定 —— `Host` 头必须是可解析且回环的地址；`Sec-Fetch-Site` 不能是 `cross-site`；没带 `Origin` 放行（同源导航与 `fetch` 的常见形态）；带了 `Origin` 就必须与 `Host` 完全一致。任一不满足直接 `403 {error:{code:'forbidden'}}`。
+
+**为什么不复用 `access.json` 的 Bearer**：
+
+1. 那份凭据是给**外部进程**（Codex 的 stdio 代理）用的，页面拿不到也不该拿到——一旦发到渲染进程，它就进了浏览器内存与开发者工具。
+2. 设置页的请求来自宿主自己的网页服务，与页面同源；插件只验来源即可，不需要第二条凭据。
+3. 反过来，**Codex 配置管理不能暴露到任意 Origin**：它能让本机执行 `codex mcp add/remove` 并写 `AGENTS.md`，所以这条路由只挂在 DSH 网页服务上（受宿主围栏 + 来源判定双重限制），不挂在那个只认 Bearer 的独立回环端口上。
+
+**注册时机**：`ctx.get('webServer')` 在插件 apply 时可能还没就绪（cordis 服务按需构造）。`src/host/web-route.ts` 先试一次，失败就 `ctx.on('internal/service', ...)` 等 `webServer` 出现再挂一次，挂上后立刻退订；`ctx.effect` 负责在插件卸载时注销路由。
 
 ## 6. 状态机
 
@@ -731,27 +790,27 @@ cwd 被占用 ⟺ 该 cwd 下存在本插件创建、且 readState(sessionId).ru
 
 ## 10. 架构决策记录
 
-### ADR-001：手写 JSON-RPC 分派，不引入 MCP SDK
+### ADR-001：使用官方 MCP SDK
 
 **状态**：已接受
 
-**背景**：本机 asar 内 `@modelcontextprotocol` 只有 `client@2.2.0` 与 `core@2.2.0`。`core` 的 `dist/index.mjs` 仅 10KB，导出全是 zod schema 常量，**不含** `Server`、`McpServer`、`Protocol`、`StreamableHTTPServerTransport`。
+**背景**：宿主内置包不是本插件所需的完整服务端 SDK，协议实现应使用本插件声明的依赖，而不是依赖宿主未公开的内部包。
 
-**决策**：用 `@modelcontextprotocol/core` 的 schema 常量做校验，自己实现 `initialize` / `tools/list` / `tools/call` / `notifications/initialized` 的分派与 SSE 帧。
+**决策**：声明 `@modelcontextprotocol/sdk` 依赖，使用其 MCP 服务端、Streamable HTTP 与 stdio 客户端能力。业务用例和六态投影仍由本插件负责。
 
-**备选**：自带 `@modelcontextprotocol/sdk` 依赖并引入构建链。
+**备选**：手写 JSON-RPC、协议协商与传输；不采用，以免重复维护协议细节。
 
-**影响**：第 1 阶段零新增依赖、零构建步骤；代价是分派逻辑自己维护，需覆盖 MCP 版本协商与 `Accept` 头分支。
+**影响**：源码经 TypeScript 构建，发布包携带 `lib/` 预构建产物。
 
-### ADR-002：HTTP 载体用 `ctx.webServer.register`
+### ADR-002：MCP 与原生设置页分别提供通道
 
 **状态**：已接受
 
-**背景**：`WebRoute.handler(req, res)` 拥有完整响应生命周期，可长挂，适合 SSE；`Config.host` 在加载期就拒绝 `0.0.0.0`/`::`，天然满足「仅回环」。
+**背景**：外部 Codex 与 DSH 原生设置页是不同调用方，所需身份校验和操作范围不同。
 
-**决策**：不自起 `http.createServer`，全部路由经 `ctx.webServer.register`。
+**决策**：MCP 与 CMD 设置接口监听插件自己的 `127.0.0.1` 随机端口，校验专用 Bearer 凭据。原生设置页通过 `webServer.register` 注册同源前缀路由，提供 Codex 接入与协作规则管理。
 
-**影响**：端口与生命周期由宿主统一管理，卸载即关闭；代价是路由路径需避开宿主已占用的前缀。
+**影响**：Codex 不必打开普通浏览器访问。插件卸载时关闭自己拥有的监听，并注销宿主路由，不结束用户的 DSH 会话。
 
 ### ADR-003：端口/适配器隔离宿主 API
 
@@ -887,3 +946,31 @@ cwd 被占用 ⟺ 该 cwd 下存在本插件创建、且 readState(sessionId).ru
 - 代价：多一条路由、多一层回调注入；`src/index.ts` 要同时注册两条路由并在失败时回滚已注册的那条。
 - **未验证**：TUI 未在真实终端里跑过（只验证了 `--help` 与类型检查）；设置路由未接真实 DSH 实例（`U` 系列未验证项见 `docs/REVIEW.md` 1.2）。
 - **退场条件**：若 DSH 后续提供官方的「插件设置界面」扩展点（类似 client 侧的 settings 面板），应把 TUI 换成该扩展点，本 ADR 随之失效。
+
+### ADR-012：设置页用宿主原生 `settings.section` 槽位，不另建网页
+
+**背景**：第 ④ 步的设置只能靠 CLI 改。用户要的是「在 DSH 设置里直接点」。宿主提供了客户端插件机制：包在 `package.json` 里声明 `dsh.client`，产物是一个 `window.__ModuleLoader__.load({ id, factory })` 形式的客户端模块，由宿主在渲染进程加载并注入 `React`；`@deepseek-ai/dsh-client-ui-settings` 在 `settings.section` 槽位上按注册项生成左侧菜单与右侧内容页。
+
+**备选方案**：
+
+| 方案 | 做法 | 为什么不选 |
+|---|---|---|
+| 另起一个本地网页 | 插件起 HTTP 服务，用户浏览器打开 | 多一个要鉴权的入口、多一份前端构建链；且它天然是「外部来源」，正好撞上 5.9 的 `Browser access` 围栏 |
+| 复用独立回环端口做设置页 | 把页面挂在 `/mcp/*` 旁边 | 那个端口只认 Bearer，页面拿不到也不该拿 `access.json`；把 Codex 配置管理暴露到无来源校验的端口上，等于把「能执行 `codex mcp add/remove`、能写 AGENTS.md」的能力开放给任何本机进程 |
+| **注册 `settings.section` 槽位** | 客户端模块调 `ctx.slots.inject('settings.section', ...)` | 原生入口、原生主题、停用插件即消失；请求走 DSH 自己的网页服务，自带渲染进程身份 |
+| 用 JSX + 打包器 | 上 Vite/React 构建链 | 为一个设置页引入整套前端工具链，且**不能**把 React 打进产物（宿主已注入，两份 React 会让 hooks 直接崩） |
+
+**决策**：
+
+1. 客户端源码放 `src/client/`，用 `ts.transpileModule` 逐片段转译后拼成单文件 `lib/client.js`（`scripts/build-client.mjs`），外面套宿主要求的 `__ModuleLoader__.load` 包装。`package.json` 补 `exports["./client"]`、`dsh.client = { platform: 'web', immediately: true, inject: ['@deepseek-ai/dsh-client-ui-settings'] }`。
+2. React 运行时由宿主提供，只增加 `@types/react` 开发依赖；`declare const React: typeof import('react')` 保留真实类型。`tsconfig.client.json` 使用严格模式和 DOM lib，构建前执行客户端类型检查。片段共享工厂作用域，不写顶层 `import`/`export`；跨文件类型使用 `import('...')` 类型查询，转译时擦除。
+3. 草稿状态放模块级 store（`src/client/logic/store.ts`），组件用 `React.useSyncExternalStore` 订阅。原因：设置分区由宿主 `renderSlot` 渲染，对话流式输出会持续触发整页重渲染，分区被重挂载时组件状态全部丢失——草稿会凭空消失、下拉跳回已保存值。
+4. 「保存」把草稿一次性提交给 `/codex-dsh-dispatch/api/settings`，落到既有的 `readSettings`/`writeSettings` 用例与 `settings.json`；**不建第二份默认值**。「还原」只清草稿，不回写 DSH 全局默认。
+5. Codex 接入（登记/移除/写 AGENTS）全部在插件进程内执行，页面只发意图。目标 Node 由 `src/codex/node-runtime.ts` 解析：Electron 宿主下 `process.execPath` 是 DSH 自己的可执行文件，**不能当 Node 用**，因此该模块显式拒绝它，并允许用户在设置页填绝对路径。
+
+**影响**：
+
+- 好处：用户不必装全局 CLI 就能接上 Codex；入口与主题都是原生的；停用插件后菜单项自然消失（槽位随客户端模块卸载）。
+- 代价：多一套浏览器端构建（`tsconfig.client.json` + `scripts/build-client.mjs`），`check-boundaries` 要加 `client` 层与 D8；`tsconfig.json` 必须 `exclude` `src/client`，否则后端严格配置会把它当 Node 代码检查。
+- **未验证**：客户端产物未在真实 DSH 渲染进程里加载过；`settings.section` 的注册项 options 形状取自宿主 `contract/slots.ts` 与参考插件的实际用法，未做运行时验证。
+- **与 ADR-011 的关系**：ADR-011 的退场条件（「若 DSH 提供官方插件设置界面扩展点，应把 TUI 换成该扩展点」）已部分成立——设置页已存在，但 TUI 保留为可选通道，两者调同一组用例与同一份配置，不是两个配置源。

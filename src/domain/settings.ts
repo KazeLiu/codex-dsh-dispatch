@@ -10,6 +10,7 @@
  */
 
 import { bridgeError } from './errors.js'
+import type { WorkspaceSummary } from './workspace.js'
 import type { ModelCatalogEntry } from './model-choice.js'
 import { presetOfLevel } from './permission-map.js'
 import type { PermissionLevel, SavedModel } from './types.js'
@@ -77,6 +78,8 @@ export interface SettingsInvalid {
   readonly model: boolean
   readonly reasoningEffort: boolean
   readonly permission: boolean
+  /** 保存的工作区 ID 已不在宿主里；不替用户改选，只标出来。 */
+  readonly workspace: boolean
 }
 
 /** 与 DSH 的连接状态。 */
@@ -96,32 +99,50 @@ export interface SettingsSnapshot {
   readonly providers: readonly SettingsProvider[]
   readonly dshDefault: SavedModelChoice | null
   readonly permissions: readonly SettingsPermissionOption[]
+  /** 宿主已登记的工作区，供「无项目默认工作区」下拉直接选。 */
+  readonly workspaces: readonly WorkspaceSummary[] | null
   /** 桥接初始默认值，恒为 `ask`。 */
   readonly initialPermission: PermissionLevel
   readonly saved: {
     readonly model: SavedModelChoice | null
     readonly permission: PermissionLevel | null
+    /** 保存的工作区 ID（不是路径）；未设置为 `null`。 */
+    readonly workspaceId: string | null
     readonly invalid: SettingsInvalid
   }
 }
 
-/** 设置页的写入请求。 */
+/**
+ * 设置页的写入请求：**可选字段的补丁**。
+ *
+ * 省略与 `null` 语义不同：省略表示「这次不改这一项」，`null` 表示「改回跟随
+ * DSH」。老版本 CLI 与老的 `/mcp/settings` 调用只传模型与权限，绝不能因为
+ * 少了 `workspaceId` 就把用户存好的默认工作区清掉。
+ */
 export interface SettingsUpdate {
-  readonly model: SavedModelChoice | null
-  readonly permission: PermissionLevel | null
+  readonly model?: SavedModelChoice | null
+  readonly permission?: PermissionLevel | null
+  readonly workspaceId?: string | null
 }
 
 /* ------------------------------------------------------------------ *
  * 持久化模型
  * ------------------------------------------------------------------ */
 
-/** 设置文件格式版本；结构变化时递增。 */
-export const SETTINGS_VERSION = 2
+/**
+ * 设置文件格式版本；结构变化时递增。
+ *
+ * 3：加入 `defaults.workspaceId`。旧文件没有该字段时按「未设置」读，
+ * 不影响模型与权限两项。
+ */
+export const SETTINGS_VERSION = 3
 
 /** 桥接保存的默认值。 */
 export interface SettingsDefaults {
   readonly model: SavedModelChoice | null
   readonly permission: PermissionLevel | null
+  /** 无项目默认工作区的 ID；`null` 表示未设置。 */
+  readonly workspaceId: string | null
 }
 
 /** 磁盘上的形态。 */
@@ -133,7 +154,7 @@ export interface PersistedSettings {
 /** 空设置：两项都跟随 DSH。 */
 export const EMPTY_SETTINGS: PersistedSettings = {
   version: SETTINGS_VERSION,
-  defaults: { model: null, permission: null },
+  defaults: { model: null, permission: null, workspaceId: null },
 }
 
 /** 三档权限的中文标签。 */
@@ -170,6 +191,8 @@ export function parseSettingsDocument(value: unknown): PersistedSettings {
     defaults: {
       model: parseSavedModelChoice(record['model']),
       permission: readPermissionLevel(record['permission']),
+      // 旧文件没有这一项：读成「未设置」，不是读失败。
+      workspaceId: readNullableString(record['workspaceId']),
     },
   }
 }
@@ -233,10 +256,17 @@ export function readSettingsUpdate(value: unknown): SettingsUpdate {
     throw bridgeError('invalid-argument', '设置请求体必须是对象', { field: 'body' })
   }
   const record = value as Record<string, unknown>
-  return {
-    model: readUpdateModel(record['model']),
-    permission: readUpdatePermission(record['permission']),
-  }
+  // 只把请求里真正出现的字段放进补丁：`'model' in record` 为假时这里不加键，
+  // 落盘那一步据此保留磁盘上的旧值。
+  const patch: {
+    model?: SavedModelChoice | null
+    permission?: PermissionLevel | null
+    workspaceId?: string | null
+  } = {}
+  if ('model' in record) patch.model = readUpdateModel(record['model'])
+  if ('permission' in record) patch.permission = readUpdatePermission(record['permission'])
+  if ('workspaceId' in record) patch.workspaceId = readUpdateWorkspace(record['workspaceId'])
+  return patch
 }
 
 /** 校验请求体里的模型项。 */
@@ -284,12 +314,26 @@ function readUpdatePermission(value: unknown): PermissionLevel | null {
   return level
 }
 
+/** 校验请求体里的默认工作区 ID。空串与 `null` 都表示清除。 */
+function readUpdateWorkspace(value: unknown): string | null {
+  if (value === null || value === undefined) return null
+  if (typeof value !== 'string') {
+    throw bridgeError('invalid-argument', 'workspaceId 必须是字符串或 null', {
+      field: 'workspaceId',
+    })
+  }
+  const trimmed = value.trim()
+  return trimmed === '' ? null : trimmed
+}
+
 /** 组装快照所需的输入。 */
 export interface SettingsSnapshotInput {
   readonly catalog: readonly ModelCatalogEntry[]
   readonly dshDefault: { readonly provider: string; readonly model: string; readonly reasoningEffort?: string | undefined } | null
   readonly availablePresetIds: readonly string[]
   readonly saved: SettingsDefaults
+  /** 宿主已登记的工作区；读不到为 null。 */
+  readonly workspaces: readonly WorkspaceSummary[] | null
   /** 读模型目录失败时的中文原因；成功为 `null`。 */
   readonly catalogError: string | null
 }
@@ -322,6 +366,12 @@ export function buildSettingsSnapshot(input: SettingsSnapshotInput): SettingsSna
     input.saved.permission !== null &&
     presetsReadable &&
     !input.availablePresetIds.includes(presetOfLevel(input.saved.permission))
+  // 工作区列表读得到才判失效：读不到（宿主没起、服务晚就绪）不等于工作区被删。
+  // 失效也不替用户改选，只把 `saved.workspaceId` 原样留着让人重选或清除。
+  const workspaceInvalid =
+    input.saved.workspaceId !== null &&
+    input.workspaces !== null &&
+    !input.workspaces.some((workspace) => workspace.id === input.saved.workspaceId)
 
   return {
     connection: {
@@ -340,14 +390,17 @@ export function buildSettingsSnapshot(input: SettingsSnapshotInput): SettingsSna
             reasoningEffort: input.dshDefault.reasoningEffort ?? null,
           },
     permissions: toPermissionOptions(input.availablePresetIds),
+    workspaces: input.workspaces,
     initialPermission: 'ask',
     saved: {
       model: savedModel,
       permission: input.saved.permission,
+      workspaceId: input.saved.workspaceId,
       invalid: {
         model: modelInvalid,
         reasoningEffort: effortInvalid,
         permission: permissionInvalid,
+        workspace: workspaceInvalid,
       },
     },
   }

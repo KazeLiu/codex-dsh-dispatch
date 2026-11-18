@@ -309,4 +309,17 @@ export interface HostContext {
    * `ctx.effect(() => { cleanup() })` 会在注册当场执行一次清理。
    */
   effect(execute: () => (() => void) | void, label?: string): void
+  /**
+   * 订阅一个 cordis 事件，返回退订函数。
+   *
+   * 来源：`@deepseek-ai/cordis/src/events.ts` 的
+   * `on<K extends keyof Events>(name: K, listener: Events[K], options?): () => boolean`
+   * — 返回的 disposer 是幂等的，再次调用只返回 `false` 而不抛错。
+   *
+   * 本插件只用它等 `webServer` 服务晚就绪：`'internal/service'` 事件的
+   * 签名（同文件 `interface Events`）是
+   * `(this: Context, name: string, value: any): void`，普通 emit 模式。
+   * 宿主没有 `ctx.off`，退订就是调用这里返回的函数。
+   */
+  on(name: string, listener: (...args: never[]) => void): () => boolean
 }

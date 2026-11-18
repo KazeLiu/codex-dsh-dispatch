@@ -11,12 +11,18 @@ export const START_TOOL: ToolDefinition = {
   name: 'dsh_start',
   title: '启动 DSH 任务',
   description:
-    '在一个绝对工作目录下启动 DSH 任务，返回 workspaceId / sessionId / cwd / requestId / status ' +
-    '以及本次实际生效的模型与权限档位（含各自来源）。同一 requestId 重复调用不会重复建会话。',
+    '启动 DSH 任务，返回 workspaceId / sessionId / cwd / requestId / status，' +
+    '以及本次实际生效的模型与权限档位（含各自来源）。' +
+    'cwd 可省略：省略时使用用户在 DSH 设置里选定的「无项目默认工作区」；' +
+    '只要有具体项目目录就应当传 cwd，别把系统运行目录当目标。' +
+    '同一 requestId 重复调用不会重复建会话。',
   inputSchema: {
     type: 'object',
     properties: {
-      cwd: { type: 'string', description: '绝对工作目录路径' },
+      cwd: {
+        type: 'string',
+        description: '项目的绝对工作目录；省略则使用设置里保存的无项目默认工作区',
+      },
       task: { type: 'string', description: '完整任务文字' },
       requestId: { type: 'string', description: '客户端生成的稳定请求 ID，用于幂等' },
       sourcePermission: {
@@ -35,7 +41,7 @@ export const START_TOOL: ToolDefinition = {
         additionalProperties: false,
       },
     },
-    required: ['cwd', 'task', 'requestId'],
+    required: ['task', 'requestId'],
     additionalProperties: false,
   },
   run: (deps, args) =>

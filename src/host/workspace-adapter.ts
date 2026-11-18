@@ -10,8 +10,13 @@
  */
 
 import { bridgeError } from '../domain/errors.js'
-import type { EnsureWorkspaceInput, EnsureWorkspaceResult, WorkspacePort } from '../ports/workspace-port.js'
-import { requireService } from './context.js'
+import type {
+  EnsureWorkspaceInput,
+  EnsureWorkspaceResult,
+  WorkspacePort,
+  WorkspaceSummary,
+} from '../ports/workspace-port.js'
+import { readService, requireService } from './context.js'
 import type { HostContext } from './host-types.js'
 
 export function createWorkspaceAdapter(ctx: HostContext): WorkspacePort {
@@ -46,6 +51,27 @@ export function createWorkspaceAdapter(ctx: HostContext): WorkspacePort {
         workspaceId: workspace.id,
         canonicalCwd: workspace.path,
         created: after > before,
+      }
+    },
+
+    async resolveWorkspace(id: string): Promise<EnsureWorkspaceResult | null> {
+      const registry = requireService(ctx, 'workspaceRegistry')
+      const workspace = registry.get(id)
+      if (workspace === undefined) return null
+      return { workspaceId: workspace.id, canonicalCwd: workspace.path, created: false }
+    },
+
+    async listWorkspaces(): Promise<readonly WorkspaceSummary[] | null> {
+      const registry = readService(ctx, 'workspaceRegistry')
+      if (registry === undefined) return null
+      try {
+        return registry.list().map(workspace => ({
+          id: workspace.id,
+          path: workspace.path,
+          title: workspace.title,
+        }))
+      } catch {
+        return null
       }
     },
   }

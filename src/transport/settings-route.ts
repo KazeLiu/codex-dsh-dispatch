@@ -117,7 +117,8 @@ async function handleWrite(
   try {
     // 字段校验交给领域层：传输层不重复实现一遍规则，否则两处必然漂移。
     const update = readSettingsUpdate(body)
-    const snapshot = await handlers.write(update)
+    // 保留原有 PUT 语义：省略旧字段仍表示重置；新增工作区字段省略时不改动。
+    const snapshot = await handlers.write({ ...update, model: update.model ?? null, permission: update.permission ?? null })
     sendJson(res, 200, withOrigin(snapshot, req))
   } catch (cause) {
     sendFailure(res, cause)

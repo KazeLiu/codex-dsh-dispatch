@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process'
-import { access } from 'node:fs/promises'
-import { delimiter, dirname, join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { resolveNodeRuntime } from './node-runtime.js'
+import { findOnPath, isFile } from './path-scan.js'
 
 /**
  * Codex 官方 CLI 的调用适配层。
@@ -8,6 +9,9 @@ import { delimiter, dirname, join } from 'node:path'
  * 只做两件事：解析出一个**可以安全 execFile** 的调用方式，以及把
  * `codex mcp ...` 的结果结构化。刻意不直接读写 `~/.codex/config.toml`：
  * 配置格式属于 Codex，改由官方 CLI 落地，才不会碰到别的 MCP 服务器。
+ *
+ * 这一层同时被 TUI 与插件后端使用，所以放在 `src/codex/` 而不是 `src/tui/`：
+ * 后端要复用同一套「怎么调 codex」的判断，不能复制一份同义实现。
  */
 
 /** 一次 codex 调用的结果。非零退出码也走正常返回，由调用方判断语义。 */
@@ -48,27 +52,14 @@ export interface McpServerInfo {
 const WINDOWS_CANDIDATES = ['codex.exe', 'codex.cmd', 'codex.bat', 'codex'] as const
 const POSIX_CANDIDATES = ['codex'] as const
 
-async function isFile(path: string): Promise<boolean> {
-  try {
-    await access(path)
-    return true
-  } catch {
-    return false
-  }
-}
-
-/** 按 PATH 顺序找第一个命中的候选名。 */
-async function findOnPath(candidates: readonly string[]): Promise<string | null> {
-  const raw = process.env['PATH'] ?? ''
-  for (const entry of raw.split(delimiter)) {
-    const dir = entry.trim().replace(/^"(.*)"$/, '$1')
-    if (dir === '') continue
-    for (const name of candidates) {
-      const candidate = join(dir, name)
-      if (await isFile(candidate)) return candidate
-    }
-  }
-  return null
+export interface ResolveCodexOptions {
+  /**
+   * 用来启动 `codex.js` 的 node 绝对路径。
+   *
+   * 不传时按 PATH 解析真正的 Node（见 `node-runtime.ts`）。**不能**回退到
+   * `process.execPath`：桌面端宿主下那是 `DSH.exe`。
+   */
+  readonly node?: string | null
 }
 
 /**
@@ -79,7 +70,7 @@ async function findOnPath(candidates: readonly string[]): Promise<string | null>
  * 定位同目录 `node_modules/@openai/codex/bin/codex.js`，用 Node 启动，
  * 参数仍然以数组形式传递。
  */
-export async function resolveCodexCli(): Promise<CodexInvocation> {
+export async function resolveCodexCli(options?: ResolveCodexOptions): Promise<CodexInvocation> {
   const candidates = process.platform === 'win32' ? WINDOWS_CANDIDATES : POSIX_CANDIDATES
   const found = await findOnPath(candidates)
   if (found === null) {
@@ -95,13 +86,21 @@ export async function resolveCodexCli(): Promise<CodexInvocation> {
           '请改装 Codex 官方原生可执行文件，或把 codex.exe 放到 PATH 中。',
       )
     }
+    const node = await resolveNodeForScript(options?.node)
     return {
-      command: process.execPath,
+      command: node,
       prefixArgs: [script],
       description: `${found}（用 Node 启动 ${script}）`,
     }
   }
   return { command: found, prefixArgs: [], description: found }
+}
+
+/** 批处理包装脚本必须借 Node 启动；拿不到可用 Node 就报错，不猜。 */
+async function resolveNodeForScript(configured?: string | null): Promise<string> {
+  const resolved = await resolveNodeRuntime(configured)
+  if (!resolved.ok) throw new CodexCliError(resolved.message)
+  return resolved.runtime.path
 }
 
 function exec(command: string, args: readonly string[]): Promise<CodexResult> {
@@ -194,7 +193,6 @@ export async function removeMcpServer(invocation: CodexInvocation, name: string)
   }
 }
 
-/** 一行人类可读的传输描述。 */
 /** 把 URL 里的 userinfo、query、fragment 去掉，避免把令牌一起打印出来。 */
 function redactUrl(raw: string): string {
   try {

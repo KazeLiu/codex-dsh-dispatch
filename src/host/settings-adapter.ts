@@ -112,12 +112,21 @@ export function createSettingsAdapter(
     },
 
     write(input): Promise<PersistedSettings> {
+      // 「读-合并-写」全在同一个串行段里：补丁只覆盖它带来的键，其余读盘旧值。
+      // 这样老版本 CLI 与只传模型/权限的调用不会清掉默认工作区，而并发的两次保存
+      // 也不会互相看到对方的半成品。
       return serial(async () => {
+        const previous = await load()
         const next: PersistedSettings = {
           version: SETTINGS_VERSION,
           defaults: {
-            model: input.defaults.model,
-            permission: input.defaults.permission,
+            model: 'model' in input.defaults ? (input.defaults.model ?? null) : previous.defaults.model,
+            permission:
+              'permission' in input.defaults ? (input.defaults.permission ?? null) : previous.defaults.permission,
+            workspaceId:
+              'workspaceId' in input.defaults
+                ? (input.defaults.workspaceId ?? null)
+                : previous.defaults.workspaceId,
           },
         }
         try {

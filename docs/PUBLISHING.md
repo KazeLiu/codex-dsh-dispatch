@@ -21,15 +21,15 @@
 ```sh
 npm run typecheck
 npm run build
-# 产出 codex-dsh-dispatch-0.1.0.tgz
+# 产出 codex-dsh-dispatch-0.2.0.tgz
 npm pack --ignore-scripts
 # 发布刚检查过的同一份产物，不再次运行构建脚本
-npm publish codex-dsh-dispatch-0.1.0.tgz --ignore-scripts --access public --registry=https://registry.npmjs.org
+npm publish codex-dsh-dispatch-0.2.0.tgz --ignore-scripts --access public --registry=https://registry.npmjs.org
 ```
 
 `prepare` 在源码安装和打包阶段编译 TypeScript，不登记 MCP、不写 AGENTS、不改 PATH。上面的流程先构建，再用 `--ignore-scripts` 打包并发布同一份产物。`--omit=dev` 不安装 TypeScript，但不会自动跳过脚本；源码构建仍需要开发依赖，预构建包应自带 `lib/`。
 
-上传 Release 资产时**把文件名改成不带版本号的 `codex-dsh-dispatch.tgz`**（`npm pack` 产出的原名是 `codex-dsh-dispatch-0.1.0.tgz`）。这样 `releases/latest/download/codex-dsh-dispatch.tgz` 在任何一次发版后都仍然有效；若保留带版本号的名字，`latest/download/` 会在下次发版后 404。
+上传 Release 资产时**把文件名改成不带版本号的 `codex-dsh-dispatch.tgz`**（`npm pack` 产出的原名带版本号）。这样 `releases/latest/download/codex-dsh-dispatch.tgz` 在任何一次发版后都仍然有效。
 
 ### 发布后的安装形态
 

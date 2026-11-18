@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
+
+import { resolveCodexHome } from './codex-home.js'
 
 /**
  * AGENTS.md 的托管区块读写。
@@ -35,9 +36,7 @@ export function resolveAgentsTarget(scope: AgentsScope, cwd = process.cwd()): Ag
     const dir = resolve(cwd)
     return { path: join(dir, 'AGENTS.md'), overridePath: join(dir, 'AGENTS.override.md'), scope }
   }
-  const home = process.env['CODEX_HOME']?.trim()
-  // CODEX_HOME 可能是相对路径，先解析成绝对路径再展示与写入，避免「显示一个路径、写到另一个路径」。
-  const dir = home !== undefined && home !== '' ? resolve(home) : join(homedir(), '.codex')
+  const dir = resolveCodexHome()
   return { path: join(dir, 'AGENTS.md'), overridePath: join(dir, 'AGENTS.override.md'), scope }
 }
 
