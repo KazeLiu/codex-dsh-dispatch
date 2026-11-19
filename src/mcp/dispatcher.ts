@@ -6,7 +6,7 @@ import { toErrorResult, toJsonRpcError, toTextResult } from './errors.js'
 
 /** 协议协商、取消和传输由官方 SDK 负责，工具只负责业务。 */
 export function createMcpServer(deps: AppDeps): Server {
-  const server = new Server({ name: 'codex-dsh-dispatch', version: '0.2.0' }, { capabilities: { tools: {} } })
+  const server = new Server({ name: 'codex-dsh-dispatch', version: '0.3.1' }, { capabilities: { tools: {} } })
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: TOOLS.map(tool => ({ name: tool.name, title: tool.title, description: tool.description, inputSchema: tool.inputSchema })),
   }))

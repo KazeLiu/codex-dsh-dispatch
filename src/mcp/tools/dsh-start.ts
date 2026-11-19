@@ -9,10 +9,11 @@ import type { ToolDefinition } from './types.js'
 
 export const START_TOOL: ToolDefinition = {
   name: 'dsh_start',
-  title: '启动 DSH 任务',
+  title: '新建 DSH 会话并派单',
   description:
-    '启动 DSH 任务，返回 workspaceId / sessionId / cwd / requestId / status，' +
+    '新建 DSH 会话并提交首项任务，返回 workspaceId / sessionId / cwd / requestId / status，' +
     '以及本次实际生效的模型与权限档位（含各自来源）。' +
+    '同一个 Codex 对话在同一工作区继续派单时，请把返回的 sessionId 传给 dsh_send，不要再次调用 dsh_start。' +
     'cwd 可省略：省略时使用用户在 DSH 设置里选定的「无项目默认工作区」；' +
     '只要有具体项目目录就应当传 cwd，别把系统运行目录当目标。' +
     '同一 requestId 重复调用不会重复建会话。',

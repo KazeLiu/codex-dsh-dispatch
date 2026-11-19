@@ -1,6 +1,6 @@
 {
   "name": "codex-dsh-dispatch",
-  "version": "0.2.0",
+  "version": "0.3.1",
   "description": "把 DSH 会话能力以 Streamable HTTP MCP 服务暴露给 Codex 等 MCP 客户端的 DSH 插件",
   "keywords": [
     "dsh",

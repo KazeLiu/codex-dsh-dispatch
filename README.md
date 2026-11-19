@@ -115,9 +115,9 @@ codex-dsh-dispatch config
 
 | 工具 | 用途 |
 | --- | --- |
-| `dsh_start` | 按 cwd 复用/注册工作区（或省略 cwd 用保存的默认工作区），创建专属 DSH 对话并提交任务 |
+| `dsh_start` | 按 cwd 复用/注册工作区（或使用保存的默认工作区），新建 DSH 对话并派发首项任务 |
 | `dsh_wait` | 按请求 ID 和游标等待结果或人工输入 |
-| `dsh_send` | 在原对话中补充任务（`mode: 'queue'` / `'steer'`）或回答受支持的提问 |
+| `dsh_send` | 用原 `sessionId` 在同一 DSH 对话中派发下一项任务、补充指令或回答提问 |
 | `dsh_cancel` | 显式请求取消，不把接收确认当成已取消 |
 
 `dsh_send` 的 `mode` 决定补充文字怎么投递：
@@ -127,7 +127,9 @@ codex-dsh-dispatch config
 
 `steer` 不保证立刻打断正在执行的工具调用，受理也不代表已经生效——仍然要用 `dsh_wait` 观察实际进展。`reply`（回答提问）走宿主自己的提问回答通道，不能同时指定 `mode`。
 
-同目录共享 DSH 工作区，不同 Codex 对话使用各自的 DSH 会话。本插件只串行协调自己的同目录任务，不锁用户或其他程序的文件操作。
+**同一个 Codex 对话、同一个工作区，首次用 `dsh_start`，之后用 `dsh_send` 继续。** 续派复用原 `sessionId`，每项新任务用新的 `requestId`，DSH 保留原对话的上下文。不同 Codex 对话即使在同一目录，也不会按目录复用彼此的 DSH 会话。
+
+本插件只串行协调自己的同目录任务，不锁用户或其他程序的文件操作。
 
 `dsh_start` 的 `cwd` 可以省略：**只要有具体项目目录就一律传它的绝对路径**；确认这次没有对应项目时才可以不传，不传时用设置页里选定的「无项目默认工作区」。显式传了的必须是绝对路径——传错不会回退到默认值，而是直接报错。默认工作区被删掉时不会自动重建，也不替你改选，只提示回设置页重新选择或直接传 cwd。`dsh_send` / `dsh_wait` / `dsh_cancel` 不受影响。
 
@@ -149,8 +151,8 @@ codex-dsh-dispatch config
 
 ## 工作流程
 
-1. Codex 判断方向及是否值得派单。适合委派时，用 `dsh_start` 提交任务、工作目录（只有无项目时省略）和稳定的 `requestId`。
-2. DSH 在自己的会话里实现。
+1. Codex 判断方向及是否值得派单。首次派单用 `dsh_start` 提交任务、工作目录（只有无项目时省略）和稳定的 `requestId`，记住返回的 `sessionId`。
+2. 同一 Codex 对话在同一工作区再派任务时，用 `dsh_send` 传原 `sessionId` 和新的 `requestId`。DSH 在原对话里继续实现。
 3. Codex 用 `dsh_wait` 等结果，超时继续用同一个 `requestId` 等，不重复派单。
 4. 发现方向偏了、约束漏了，用 `dsh_send` 的 `steer` 趁它还在跑直接纠偏；等它停下来才要改的，用 `queue`。
 5. Codex 审查真实差异：确认 DSH 已停止写入后，小范围 bug 由 Codex 直接修；需要较大返工时用 `dsh_send` 回到原 DSH 会话，不新开会话重做。
