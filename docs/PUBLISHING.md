@@ -45,14 +45,14 @@ npm install -g https://github.com/KazeLiu/codex-dsh-dispatch/releases/latest/dow
 
 ```cmd
 rem 锁定某个版本
-npm install -g https://github.com/KazeLiu/codex-dsh-dispatch/releases/download/v0.1.0/codex-dsh-dispatch.tgz
+npm install -g https://github.com/KazeLiu/codex-dsh-dispatch/releases/download/v0.3.1/codex-dsh-dispatch.tgz
 ```
 
-DSH 插件也可以直接用同一个 tgz 安装，不需要用户保留源码目录。商店条目的 `tarball` 指向同一个 Release 资产。
+DSH 插件也可以直接用同一个 tgz 安装，不需要用户保留源码目录。
 
 ## 3. 投稿到 awesome-dsh-plugin
 
-参考官方要求：<https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/blob/main/contributing.md>
+向 [awesome-dsh-plugin 目录](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/blob/main/contributing.md) 投稿。目录需要能读取公开仓库默认分支上的 `package.json`；PR 合并后，DSH 插件市场会跟随目录更新。
 
 ### 逐条对照
 
@@ -76,8 +76,8 @@ url: https://github.com/KazeLiu/codex-dsh-dispatch
 name: KazeLiu/codex-dsh-dispatch
 category: workflow
 description:
-  en: Exposes DSH sessions as MCP tools so Codex can dispatch implementation tasks, wait for results, steer running work, send follow-ups and cancel.
-  zh: 把 DSH 会话暴露为 MCP 工具，让 Codex 派发实现任务、等待结果、对执行中的任务纠偏、补充说明与取消。
+  en: Lets Codex dispatch tasks to DeepSeek Harness, wait for results, and follow up in the same DSH session.
+  zh: 让 Codex 向 DeepSeek Harness 派单、等待结果，并在原 DSH 对话中继续派单。
 ```
 
 说明：
@@ -86,11 +86,7 @@ description:
 - `category` 选 `workflow`：这个插件做的是把两个 agent 串成一条协作流水线，不是 UI、不是工具集合。
 - 描述只说功能，不含「强大」「最好」之类营销词。
 - 没有 `icon:`（仓库里的 `icon.svg` 是 DSH 插件图标，商店卡片要求 GitHub 托管的**位图**）。
-- 挂了 Release 之后补 `tarball`，资产名固定不带版本号，否则 `latest/download/` 会在下次发版后 404：
-
-```yaml
-tarball: https://github.com/KazeLiu/codex-dsh-dispatch/releases/latest/download/codex-dsh-dispatch.tgz
-```
+- 已发布的 npm 包由目录按 `repository` 自动关联；条目不用填 `npm:` 或固定的 `tarball:`。
 
 ### 提交
 

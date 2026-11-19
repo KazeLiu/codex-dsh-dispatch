@@ -133,7 +133,7 @@ D:\code\dsh-mcp-bridge
 
 商店条目装上的是插件本身，装完在插件管理界面启用即可。**商店安装不会把 `codex-dsh-dispatch` 命令注入 PATH**，要在任意目录用命令仍需单独做一次全局安装（见下）。
 
-当前仓库尚未投稿，商店里还搜不到本插件；这一节描述的是发布之后的形态。
+目录收录并同步后，在「插件市场」搜索 `codex-dsh-dispatch`。市场尚未显示时，可以先按上面的步骤从 npm 安装。
 
 ### 全局 CLI：npm 或 Release tgz
 
@@ -151,7 +151,7 @@ npm install -g https://github.com/KazeLiu/codex-dsh-dispatch/releases/latest/dow
 
 Release 资产名固定为 `codex-dsh-dispatch.tgz`。要锁定某个已发布版本，可将 `releases/latest/download/` 换成 `releases/download/<tag>/`。
 
-预构建包自带 `lib/`，不需要用户自己编译。商店条目的 `tarball` 指向同一个 Release 资产。
+预构建包自带 `lib/`，不需要用户自己编译。市场通过 npm 包的 `repository` 字段关联本仓库。
 
 ## Codex 接入
 
