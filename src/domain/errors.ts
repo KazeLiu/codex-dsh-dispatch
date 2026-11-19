@@ -17,6 +17,10 @@ export type BridgeErrorCode =
   | 'session-not-found'
   /** 请求指定的模型在当前 Profile 中不存在。 */
   | 'model-unavailable'
+  /** DSH 全局默认模型不在当前 Profile 的可用目录里；需要用户在 DSH 设置里改。 */
+  | 'dsh-default-unavailable'
+  /** 宿主拒绝了在会话上启用所选模型（接口都在，但写入没成功）。 */
+  | 'model-selection-failed'
   /** 请求指定的思考强度不被该模型支持。 */
   | 'reasoning-effort-unavailable'
   /** 桥接保存的默认模型已失效。 */

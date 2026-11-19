@@ -12,18 +12,21 @@ import type {
 } from '../ports/model-port.js'
 import type { ModelCatalogEntry } from '../domain/model-choice.js'
 import { bridgeError } from '../domain/errors.js'
-import { readService, requireService } from './context.js'
-import type { HostContext, HostModelCatalog } from './host-types.js'
+import { missingCapability, requireController } from './capabilities.js'
+import { readService } from './context.js'
+import type { HostAgent, HostContext, HostModelCatalog } from './host-types.js'
 
 export function createModelAdapter(ctx: HostContext): ModelPort {
   return {
     async catalog(): Promise<ModelCatalogResult> {
       const controller = readService(ctx, 'sessionController')
       if (controller === undefined) return { entries: [], dshDefault: null }
+      const readCatalog = controller.modelCatalog
+      if (typeof readCatalog !== 'function') missingCapability('modelCatalog')
 
       let catalog: HostModelCatalog
       try {
-        catalog = await controller.modelCatalog()
+        catalog = await readCatalog.call(controller)
       } catch (cause) {
         throw bridgeError('model-unavailable', '读取模型目录失败', {}, cause)
       }
@@ -38,11 +41,30 @@ export function createModelAdapter(ctx: HostContext): ModelPort {
     },
 
     async applySelection(input: ApplySelectionInput): Promise<void> {
-      const controller = requireService(ctx, 'sessionController')
+      const controller = requireController(ctx, ['resolveAgent'])
+
+      let resolved: { readonly agent: HostAgent } | { readonly error: unknown }
       try {
-        const resolved = await controller.resolveAgent(input.sessionId)
-        if ('error' in resolved) throw bridgeError('session-not-found', '会话无法激活', { sessionId: input.sessionId })
-        resolved.agent.model.select({
+        resolved = await controller.resolveAgent(input.sessionId)
+      } catch (cause) {
+        throw bridgeError('internal', 'DSH 无法激活会话，任务未提交', { sessionId: input.sessionId }, cause)
+      }
+      if ('error' in resolved) {
+        const error = resolved.error
+        const notFound = typeof error === 'object' && error !== null && 'code' in error && error.code === 'session/not-found'
+        throw bridgeError(
+          notFound ? 'session-not-found' : 'internal',
+          'DSH 无法激活会话，任务未提交',
+          { sessionId: input.sessionId },
+          error,
+        )
+      }
+
+      const agentModel = resolved.agent.model
+      if (typeof agentModel?.select !== 'function') missingCapability('agentModel', { sessionId: input.sessionId })
+
+      try {
+        agentModel.select({
           provider: input.provider,
           model: input.model,
           // `null` 表示「跟随模型默认」，此时**不传**该字段，让宿主取默认；
@@ -51,9 +73,14 @@ export function createModelAdapter(ctx: HostContext): ModelPort {
         })
       } catch (cause) {
         throw bridgeError(
-          'model-unavailable',
-          `应用模型 ${input.provider}/${input.model} 失败`,
-          { provider: input.provider, model: input.model },
+          'model-selection-failed',
+          `无法在会话上启用模型 ${input.provider}/${input.model}，任务未提交`,
+          {
+            sessionId: input.sessionId,
+            provider: input.provider,
+            model: input.model,
+            reasoningEffort: input.reasoningEffort,
+          },
           cause,
         )
       }
@@ -66,7 +93,7 @@ export function createModelAdapter(ctx: HostContext): ModelPort {
     } | null> {
       // 优先读取会话模型控制器；未取得时只读取原生日志中的实际调用配置。
       const agent = readService(ctx, 'agents')?.get(input.sessionId)
-      const current = agent?.model.current()
+      const current = agent?.model?.current()
       if (current !== undefined) return { ...current, reasoningEffort: current.reasoningEffort ?? null }
       const session = readService(ctx, 'sessions')?.get(input.sessionId)
       const events = session?.snapshotEvents() ?? []

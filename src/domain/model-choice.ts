@@ -40,6 +40,8 @@ export type ModelChoiceFailure =
   | 'requested-effort-unavailable'
   /** 保存的默认模型已失效。 */
   | 'saved-model-unavailable'
+  /** DSH 全局默认模型不在可用目录里（与「目录里一个模型都没有」不同）。 */
+  | 'dsh-default-unavailable'
   /** 三层都没有可用的模型。 */
   | 'no-model-available'
 
@@ -171,6 +173,12 @@ export function resolveModelChoice(input: ModelChoiceInput): ModelChoiceResult {
           source: 'dsh-default' satisfies ModelSource,
         },
       }
+    }
+    return {
+      ok: false,
+      failure: 'dsh-default-unavailable',
+      detail: `当前 Profile 的模型目录未列出 DSH 默认模型 ${dshDefault.provider}/${dshDefault.model}。` +
+        '请检查 DSH 设置中的供应商和默认模型，或在 dsh_start 中指定可用模型。',
     }
   }
 

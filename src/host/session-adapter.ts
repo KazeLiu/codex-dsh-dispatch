@@ -32,7 +32,7 @@ import type {
   SessionPort,
   WaitInput,
 } from '../ports/session-port.js'
-import { requireService } from './context.js'
+import { requireController } from './capabilities.js'
 import type { HostContext, HostSessionEventEntry, HostSessionState } from './host-types.js'
 
 /** 宿主 `SessionPendingInput` 到桥接语义的映射。 */
@@ -45,7 +45,8 @@ function toPendingInputKind(raw: string): PendingInputKind {
 export function createSessionAdapter(ctx: HostContext): SessionPort {
   return {
     async createSession(input: CreateSessionInput): Promise<CreateSessionResult> {
-      const controller = requireService(ctx, 'sessionController')
+      // 旧宿主能建会话，但不能完成派单和等待；不要先留下空会话再报错。
+      const controller = requireController(ctx, ['create', 'resolveAgent', 'state', 'events', 'wait', 'prompt'])
       try {
         // 只传 workspaceId：宿主 create 内部会 get(workspaceId) 取 path 并
         // attachSession，调用方不需要也不应该再 attach（cwd 与 workspaceId 互斥）。
@@ -57,7 +58,7 @@ export function createSessionAdapter(ctx: HostContext): SessionPort {
     },
 
     async prompt(input: PromptInput): Promise<PromptResult> {
-      const controller = requireService(ctx, 'sessionController')
+      const controller = requireController(ctx, ['prompt'])
       try {
         const result = await controller.prompt({
           requestId: input.requestId,
@@ -77,7 +78,7 @@ export function createSessionAdapter(ctx: HostContext): SessionPort {
     },
 
     async wait(input: WaitInput): Promise<WaitOutcome> {
-      const controller = requireService(ctx, 'sessionController')
+      const controller = requireController(ctx, ['wait'])
       let result
       try {
         result = await controller.wait(
@@ -120,7 +121,7 @@ export function createSessionAdapter(ctx: HostContext): SessionPort {
     },
 
     async cancel(input: CancelInput): Promise<CancelResult> {
-      const controller = requireService(ctx, 'sessionController')
+      const controller = requireController(ctx, ['cancel'])
       try {
         const result = controller.cancel({ sessionId: input.sessionId })
         return { accepted: result.accepted }
@@ -135,7 +136,7 @@ export function createSessionAdapter(ctx: HostContext): SessionPort {
     },
 
     async readState(input: ReadStateInput): Promise<SessionSnapshot> {
-      const controller = requireService(ctx, 'sessionController')
+      const controller = requireController(ctx, ['state'])
       let state: HostSessionState
       try {
         state = await controller.state({ sessionId: input.sessionId }, new AbortController().signal)
@@ -151,7 +152,7 @@ export function createSessionAdapter(ctx: HostContext): SessionPort {
     },
 
     async readProgress(input: ReadProgressInput): Promise<TurnProgress> {
-      const controller = requireService(ctx, 'sessionController')
+      const controller = requireController(ctx, ['state', 'events'])
       let state: HostSessionState
       try {
         state = await controller.state({ sessionId: input.sessionId }, new AbortController().signal)
@@ -192,7 +193,7 @@ async function readEventsSince(
   cursor: number,
   afterSeq: number,
 ): Promise<{ events: readonly HostSessionEventEntry[]; truncated: boolean }> {
-  const controller = requireService(ctx, 'sessionController')
+  const controller = requireController(ctx, ['events'])
   const collected: HostSessionEventEntry[] = []
   let beforeSeq: number | undefined
   const truncated = false

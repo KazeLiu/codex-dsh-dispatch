@@ -2,7 +2,7 @@
 
 装一个 DSH 插件就够了：登记 Codex、写协作规则、设默认值都在 DSH 的**设置 → Codex 派单**里点，不需要全局命令，也不需要改 PATH。
 
-前置环境：Node.js（22.x ≥22.19，或 ≥24.9）与 Codex 官方 CLI。原生设置页从 `0.2.0` 起提供；若按包名安装只得到 `0.1.0`，请改用 `0.2.0` 的本地安装包。
+前置环境：DSH NEXT **2.0.23-next**（内置 Harness `0.2.2-rc.3`）或适配的后续版本、Node.js（22.x ≥22.19，或 ≥24.9）和 Codex 官方 CLI。若按包名安装得到的是 `0.1.0`，那一版不含原生设置页；可[从源码构建](#从源码)当前版本。
 
 | | 作用 | 安装方式 |
 | --- | --- | --- |
@@ -100,7 +100,7 @@ node bin\codex-dsh-dispatch.mjs config
 
 ### 从源码
 
-本机已验证环境：DSH Desktop **2.0.23-next**，DSH 原生服务 **0.2.2-rc.3**；系统 Node.js **22.19.0**。其他宿主版本应先核对原生接口。
+本机已验证环境：DSH Desktop **2.0.23-next**，DSH 原生服务 **0.2.2-rc.3**；系统 Node.js **22.19.0**。这是本插件声明支持的下限：`engines.dsh` 与四项 peer 都是 `>=0.2.2-rc.3 <0.3.0-0`。更早的宿主（如 2.0.20-next 内置的 0.2.1-rc.3）接口不足，需要先升级 DSH。
 
 ```cmd
 cd /d D:\code\dsh-mcp-bridge
@@ -149,7 +149,7 @@ rem 从本项目的 Release tgz 安装
 npm install -g https://github.com/KazeLiu/codex-dsh-dispatch/releases/latest/download/codex-dsh-dispatch.tgz
 ```
 
-Release 资产名固定为 `codex-dsh-dispatch.tgz`，要锁定版本可使用 `releases/download/v0.1.0/codex-dsh-dispatch.tgz`。
+Release 资产名固定为 `codex-dsh-dispatch.tgz`。要锁定某个已发布版本，可将 `releases/latest/download/` 换成 `releases/download/<tag>/`。
 
 预构建包自带 `lib/`，不需要用户自己编译。商店条目的 `tarball` 指向同一个 Release 资产。
 
@@ -273,6 +273,9 @@ codex mcp add codex-dsh-dispatch -- "C:\nvm4w\nodejs\node.exe" "D:\code\dsh-mcp-
 - **连接被拒绝或超时**：确认 DSH 仍在运行、插件未停用。重新加载插件后会重新发布端口；重新启动设置客户端或 MCP 连接。
 - **出现 `Browser access is disabled`**：当前客户端连接到了旧的 DSH 网页端口。正常的自动发现不访问它；清除自己设置的 `CODEX_DSH_DISPATCH_URL`、`CODEX_DSH_DISPATCH_TOKEN` 覆盖后重试，不需要打开网页访问。
 - **模型列表为空或某个供应商失败**：检查 DSH 自己的模型目录和供应商状态，不伪造模型或自动更换保存的模型。
+- **报 `host-capability-missing`**：DSH 没有提供插件需要的接口。若在用 `2.0.20-next`，请升级到 `2.0.23-next` 或适配的后续版本再重试，不用更换模型或开放更多权限。
+- **报 `dsh-default-unavailable`**：DSH 设置里的全局默认模型不在本机可用目录里。到 DSH 设置里改成可用的模型，或在 `dsh_start` 的 `model` 里显式指定；插件不会替你静默切换。
+- **报 `model-selection-failed`**：接口都在，但宿主拒绝了在会话上启用所选模型。附带的 `sessionId`、`provider`、`model`、`reasoningEffort` 可用来定位是哪一次写入被拒。
 - **`codex mcp add` 报错**：确认 `codex --version` 能直接运行。Windows 上若只有 `.cmd` 包装脚本且找不到 `node_modules/@openai/codex/bin/codex.js`，向导会明确报错而不是拼 shell 命令。
 - **workspace-busy**：同目录已有其他本插件任务运行、排队或等待人工输入。先处理或取消该任务；不反复重新派单。
 - **需要人工输入**：在 DSH 中处理当前审批或提问。当前问题回复入口仅支持原生 `userQuestions.answer`；完整的 Codex 端审批回复仍需进一步接入。

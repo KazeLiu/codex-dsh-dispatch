@@ -9,8 +9,8 @@
  * 定位信息」的要求。
  */
 
-import { bridgeError } from '../domain/errors.js'
-import { resolveModelChoice } from '../domain/model-choice.js'
+import { BridgeError, bridgeError } from '../domain/errors.js'
+import { resolveModelChoice, type ModelChoiceFailure } from '../domain/model-choice.js'
 import { resolvePermissionChoice } from '../domain/permission-choice.js'
 import { isPermissionLevel } from '../domain/permission-map.js'
 import type { PermissionLevel, RequestedModel, TaskStatus } from '../domain/types.js'
@@ -158,11 +158,20 @@ async function executeStartTask(deps: AppDeps, input: StartTaskInput): Promise<S
         reasoningEffort: model.view.reasoningEffort,
       })
     } catch (cause) {
-      throw bridgeError('model-unavailable', '应用模型选择失败，任务未提交', {
-        ...location,
-        provider: model.view.provider,
-        model: model.view.model,
-      }, cause)
+      const error = cause instanceof BridgeError ? cause : null
+      throw bridgeError(
+        error?.code ?? 'internal',
+        error?.message ?? '应用模型选择失败，任务未提交',
+        {
+          ...error?.detail,
+          ...location,
+          provider: model.view.provider,
+          model: model.view.model,
+          reasoningEffort: model.view.reasoningEffort,
+          source: model.view.source,
+        },
+        cause,
+      )
     }
   }
 
@@ -242,8 +251,8 @@ function readExplicitCwd(value: unknown): string | null {
 
 /** 把模型解析失败原因映射到对外错误码。 */
 function mapModelFailure(
-  failure: 'incomplete-request' | 'requested-model-unavailable' | 'requested-effort-unavailable' | 'saved-model-unavailable' | 'no-model-available',
-): 'invalid-argument' | 'model-unavailable' | 'reasoning-effort-unavailable' | 'saved-model-invalid' {
+  failure: ModelChoiceFailure,
+): 'invalid-argument' | 'model-unavailable' | 'dsh-default-unavailable' | 'reasoning-effort-unavailable' | 'saved-model-invalid' {
   switch (failure) {
     case 'incomplete-request':
       return 'invalid-argument'
@@ -251,6 +260,8 @@ function mapModelFailure(
       return 'reasoning-effort-unavailable'
     case 'saved-model-unavailable':
       return 'saved-model-invalid'
+    case 'dsh-default-unavailable':
+      return 'dsh-default-unavailable'
     case 'requested-model-unavailable':
     case 'no-model-available':
       return 'model-unavailable'

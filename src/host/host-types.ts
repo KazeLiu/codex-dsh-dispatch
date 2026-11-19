@@ -113,14 +113,8 @@ export interface HostSessionController {
     cwd?: string
     agentPreset?: string
   }): Promise<{ sessionId: string; agentPreset?: string }>
-  selectModel(request: {
-    sessionId: string
-    provider: string
-    model: string
-    reasoningEffort?: string
-  }): Promise<{ selected: HostModelSelection }>
-  modelCatalog(): Promise<HostModelCatalog>
-  resolveAgent(sessionId: string): Promise<{ agent: HostAgent } | { error: unknown }>
+  modelCatalog?(): Promise<HostModelCatalog>
+  resolveAgent?(sessionId: string): Promise<{ agent: HostAgent } | { error: unknown }>
   prompt(
     request: {
       requestId: string
@@ -131,14 +125,14 @@ export interface HostSessionController {
     signal: AbortSignal,
   ): Promise<{ accepted: true }>
   cancel(request: { sessionId: string }): { accepted: true }
-  state(request: { sessionId: string }, signal: AbortSignal): Promise<HostSessionState>
+  state?(request: { sessionId: string }, signal: AbortSignal): Promise<HostSessionState>
   /**
    * 历史分页。
    * 来源：dsh-api-session-controller/src/index.ts:544
    * `events(request: SessionPageRequest, signal): Promise<SessionEventsPage>`。
    * 返回的 `records` 是**时间正序**（`history.ts` 的 `paginate` 用 `slice(cut, end)`）。
    */
-  events(
+  events?(
     request: {
       address: { kind: 'session'; sessionId: string }
       throughSeq?: number
@@ -151,7 +145,7 @@ export interface HostSessionController {
     records: readonly HostSessionEventEntry[]
     hasMore: boolean
   }>
-  wait(
+  wait?(
     request: {
       sessionId: string
       timeoutMs?: number
@@ -223,7 +217,8 @@ export interface HostSessionProjections {
 export interface HostAgent {
   readonly id: string
   readonly session: HostSession
-  readonly model: {
+  /** 旧版 dsh-agent 没有会话级模型控制器。 */
+  readonly model?: {
     select(selection: HostModelSelection): void
     current(): HostModelSelection | undefined
   }

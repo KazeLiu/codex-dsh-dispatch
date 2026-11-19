@@ -228,8 +228,10 @@ function toOptions(raw: unknown): readonly QuestionOption[] {
 async function readHasApproval(ctx: HostContext, sessionId: string): Promise<boolean> {
   const controller = readService(ctx, 'sessionController')
   if (controller === undefined) return false
+  const readState = controller.state
+  if (typeof readState !== 'function') return false
   try {
-    const state = await controller.state({ sessionId }, new AbortController().signal)
+    const state = await readState.call(controller, { sessionId }, new AbortController().signal)
     return state.pendingInput.includes('approval')
   } catch {
     return false
