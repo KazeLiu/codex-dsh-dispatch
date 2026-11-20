@@ -15,14 +15,14 @@ export const START_TOOL: ToolDefinition = {
     '以及本次实际生效的模型与权限档位（含各自来源）。' +
     '同一个 Codex 对话在同一工作区继续派单时，请把返回的 sessionId 传给 dsh_send，不要再次调用 dsh_start。' +
     'cwd 可省略：省略时使用用户在 DSH 设置里选定的「无项目默认工作区」；' +
-    '只要有具体项目目录就应当传 cwd，别把系统运行目录当目标。' +
+    '无项目对话即使有 Codex 自动生成的工作目录，也应省略 cwd；已识别的无项目目录会按省略处理。' +
     '同一 requestId 重复调用不会重复建会话。',
   inputSchema: {
     type: 'object',
     properties: {
       cwd: {
         type: 'string',
-        description: '项目的绝对工作目录；省略则使用设置里保存的无项目默认工作区',
+        description: '实际项目或 worktree 的绝对路径；无项目对话应省略，不要传 Codex 生成的对话目录',
       },
       task: { type: 'string', description: '完整任务文字' },
       requestId: { type: 'string', description: '客户端生成的稳定请求 ID，用于幂等' },

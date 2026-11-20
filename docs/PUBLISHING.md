@@ -21,10 +21,10 @@
 ```sh
 npm run typecheck
 npm run build
-# 产出 codex-dsh-dispatch-0.3.1.tgz
+# 产出 codex-dsh-dispatch-0.3.2.tgz
 npm pack --ignore-scripts
 # 发布刚检查过的同一份产物，不再次运行构建脚本
-npm publish codex-dsh-dispatch-0.3.1.tgz --ignore-scripts --access public --registry=https://registry.npmjs.org
+npm publish codex-dsh-dispatch-0.3.2.tgz --ignore-scripts --access public --registry=https://registry.npmjs.org
 ```
 
 `prepare` 在源码安装和打包阶段编译 TypeScript，不登记 MCP、不写 AGENTS、不改 PATH。上面的流程先构建，再用 `--ignore-scripts` 打包并发布同一份产物。`--omit=dev` 不安装 TypeScript，但不会自动跳过脚本；源码构建仍需要开发依赖，预构建包应自带 `lib/`。

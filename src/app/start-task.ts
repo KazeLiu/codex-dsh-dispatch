@@ -9,6 +9,7 @@
  * 定位信息」的要求。
  */
 
+import { isCodexProjectlessDirectory } from '../codex/projectless-directory.js'
 import { BridgeError, bridgeError } from '../domain/errors.js'
 import { resolveModelChoice, type ModelChoiceFailure } from '../domain/model-choice.js'
 import { resolvePermissionChoice } from '../domain/permission-choice.js'
@@ -32,7 +33,7 @@ import { readSavedModel, readSavedPermission, readSavedWorkspaceId } from './set
 
 /** `dsh_start` 入参（已从 MCP 参数解析）。 */
 export interface StartTaskInput {
-  /** 可省略：省略时用设置里保存的「无项目默认工作区」。 */
+  /** 省略或传入 Codex 已知的无项目目录时，使用「无项目默认工作区」。 */
   readonly cwd: unknown
   readonly task: unknown
   readonly requestId: unknown
@@ -63,11 +64,11 @@ async function executeStartTask(deps: AppDeps, input: StartTaskInput): Promise<S
   const sourcePermission = readSourcePermission(input.sourcePermission)
   const requestedModel = readRequestedModel(input.model)
   const explicitCwd = readExplicitCwd(input.cwd)
-  const explicitWorkspace = explicitCwd === null
+  const explicitWorkspace = explicitCwd === null || await isCodexProjectlessDirectory(explicitCwd)
     ? null
     : await deps.ports.workspace.ensureWorkspace({ cwd: explicitCwd })
 
-  // 省略 cwd 的重试沿用首次登记的目录，不重新读默认工作区。
+  // 无项目派单的重试沿用首次登记的目录，不重新读默认工作区。
   // 显式传入的目录仍参与冲突检测，不能把不同项目的请求当成同一次。
   for (const existing of await deps.ports.registry.list()) {
     const request = existing.requests?.[requestId]
@@ -215,8 +216,8 @@ async function resolveDefaultWorkspace(deps: AppDeps): Promise<{
   if (savedId === null) {
     throw bridgeError(
       'invalid-argument',
-      'dsh_start 省略了 cwd，但设置里还没有选『无项目默认工作区』。' +
-        '请在 DSH 设置 → Codex 派单 → 无项目默认工作区里选一个，或直接传 cwd。',
+      '本次是无项目派单，但设置里还没有选『无项目默认工作区』。' +
+        '请在 DSH 设置 → Codex 派单 → 无项目默认工作区里选一个，或传入实际项目的 cwd。',
       { field: 'cwd' },
     )
   }
@@ -227,7 +228,7 @@ async function resolveDefaultWorkspace(deps: AppDeps): Promise<{
     throw bridgeError(
       'invalid-argument',
       `设置里保存的默认工作区 ${savedId} 已不在当前 DSH 里。` +
-        '请到 DSH 设置 → Codex 派单 重新选择，或直接传 cwd。',
+      '请到 DSH 设置 → Codex 派单 重新选择，或传入实际项目的 cwd。',
       { field: 'cwd', workspaceId: savedId },
     )
   }
@@ -237,8 +238,7 @@ async function resolveDefaultWorkspace(deps: AppDeps): Promise<{
 /**
  * 读显式 cwd。
  *
- * 只有 `undefined` 表示没传，走默认工作区；一旦传了就必须是绝对路径，
- * 空串与相对路径照旧报错——「显式传错了」不能悄悄降级成「用了默认值」。
+ * 一旦传入 cwd 就必须是绝对路径；先校验输入，再判断它是否为 Codex 无项目目录。
  */
 function readExplicitCwd(value: unknown): string | null {
   if (value === undefined) return null

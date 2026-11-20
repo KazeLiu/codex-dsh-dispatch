@@ -13,7 +13,7 @@ export async function runMcpProxy(): Promise<void> {
     const connection = await readConnection()
     if (upstream !== undefined && connectedUrl === connection.url) return upstream
     await upstream?.close()
-    const next = new Client({ name: 'codex-dsh-dispatch-proxy', version: '0.3.1' })
+    const next = new Client({ name: 'codex-dsh-dispatch-proxy', version: '0.3.2' })
     await next.connect(new StreamableHTTPClientTransport(new URL(`${connection.url}/mcp/codex-dsh-dispatch`), {
       requestInit: { headers: { authorization: `Bearer ${connection.token}` } },
     }))
@@ -21,7 +21,7 @@ export async function runMcpProxy(): Promise<void> {
     connectedUrl = connection.url
     return next
   }
-  const server = new Server({ name: 'codex-dsh-dispatch', version: '0.3.1' }, { capabilities: { tools: {} } })
+  const server = new Server({ name: 'codex-dsh-dispatch', version: '0.3.2' }, { capabilities: { tools: {} } })
   server.setRequestHandler(ListToolsRequestSchema, async () => (await client()).listTools())
   server.setRequestHandler(CallToolRequestSchema, async (request, extra) => (await client()).callTool(request.params, undefined, { signal: extra.signal }))
   server.onclose = () => { void upstream?.close() }
